@@ -1,0 +1,7 @@
+{
+  "name": "synthetix-node-backend",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "packageManager": "yarn@4.1.1"
+}
