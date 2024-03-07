@@ -10,18 +10,25 @@ const DATA_DIR = path.join(__dirname, 'data');
 
 app.use(express.json());
 
+class HttpError extends Error {
+  constructor(message, code) {
+    super(message);
+    this.code = code;
+  }
+}
+
 const validateWalletAddress = (req, res, next) => {
   if (!req.body.walletAddress) {
-    return next({ code: 400, message: 'Missing wallet address' });
+    return next(new HttpError('Missing wallet address', 400));
   }
   if (!ethers.isAddress(req.body.walletAddress)) {
-    return next({ code: 400, message: 'Invalid wallet address' });
+    return next(new HttpError('Invalid wallet address', 400));
   }
   next();
 };
 
 const transformWalletAddress = (req, res, next) => {
-  req.body.walletAddress = `${req.body.walletAddress.toLowerCase()}.unverified`;
+  req.body.walletAddress = req.body.walletAddress.toLowerCase();
   next();
 };
 
@@ -55,15 +62,18 @@ const storeWalletAddress = async (fileName, fileContent) => {
 
 app.post('/signup', validateWalletAddress, transformWalletAddress, async (req, res, next) => {
   try {
-    if (await walletAddressStored(path.join(DATA_DIR, req.body.walletAddress))) {
+    if (await walletAddressStored(path.join(DATA_DIR, `${req.body.walletAddress}.unverified`))) {
       res.status(200).send({
-        nonce: await fs.readFile(path.join(DATA_DIR, req.body.walletAddress), 'utf8'),
+        nonce: await fs.readFile(
+          path.join(DATA_DIR, `${req.body.walletAddress}.unverified`),
+          'utf8'
+        ),
       });
       return;
     }
 
     const nonce = await generateRandomHexString();
-    await storeWalletAddress(req.body.walletAddress, nonce);
+    await storeWalletAddress(`${req.body.walletAddress}.unverified`, nonce);
     res.status(200).send({ nonce });
   } catch (err) {
     next(err);
