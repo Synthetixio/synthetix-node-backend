@@ -33,7 +33,7 @@ const walletAddressStored = async (filePath) => {
 
 const generateRandomHexString = async () => {
   return new Promise((resolve) => {
-    crypto.randomBytes(256, (err, buf) => {
+    crypto.randomBytes(32, (err, buf) => {
       if (err) throw err;
       resolve(buf.toString('hex'));
     });
@@ -53,7 +53,7 @@ const storeWalletAddress = async (fileName, fileContent) => {
 app.post('/signup', async (req, res) => {
   if (!validateWalletAddress(req, res)) return;
 
-  const filePath = path.join(DATA_DIR, req.body.walletAddress);
+  const filePath = path.join(DATA_DIR, req.body.walletAddress.toLowerCase());
   try {
     if (await walletAddressStored(filePath)) {
       res.status(200).send({ signature: await fs.readFile(filePath, 'utf8') });
@@ -61,7 +61,7 @@ app.post('/signup', async (req, res) => {
     }
 
     const randomBytes = await generateRandomHexString();
-    await storeWalletAddress(req.body.walletAddress, randomBytes);
+    await storeWalletAddress(req.body.walletAddress.toLowerCase(), randomBytes);
 
     res.status(200).send({ signature: randomBytes });
   } catch (err) {
