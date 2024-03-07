@@ -57,15 +57,14 @@ app.post('/signup', validateWalletAddress, transformWalletAddress, async (req, r
   try {
     if (await walletAddressStored(path.join(DATA_DIR, req.body.walletAddress))) {
       res.status(200).send({
-        signature: await fs.readFile(path.join(DATA_DIR, req.body.walletAddress), 'utf8'),
+        nonce: await fs.readFile(path.join(DATA_DIR, req.body.walletAddress), 'utf8'),
       });
       return;
     }
 
-    const randomBytes = await generateRandomHexString();
-    await storeWalletAddress(req.body.walletAddress, randomBytes);
-
-    res.status(200).send({ signature: randomBytes });
+    const nonce = await generateRandomHexString();
+    await storeWalletAddress(req.body.walletAddress, nonce);
+    res.status(200).send({ nonce });
   } catch (err) {
     next(err);
   }
@@ -73,6 +72,11 @@ app.post('/signup', validateWalletAddress, transformWalletAddress, async (req, r
 
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
+});
+
+app.post('/verify', async (req, res) => {
+  console.log('Verification successful');
+  res.status(200).send({ signature: 'Verification successful' });
 });
 
 app.use((err, req, res, next) => {
