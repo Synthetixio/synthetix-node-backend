@@ -4,10 +4,12 @@ const crypto = require('crypto');
 const path = require('path');
 const { promises: fs } = require('fs');
 const cors = require('cors');
+const jwt = require('jsonwebtoken');
 const app = express();
 
 const PORT = process.env.PORT || 3005;
 const DATA_DIR = path.join(__dirname, 'data');
+const SECRET_KEY = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
 
 app.use(cors());
 app.use(express.json());
@@ -93,12 +95,19 @@ const validateVerificationParameters = (req, res, next) => {
   next();
 };
 
+const sendAuthToken = async (walletAddress, res) => {
+  jwt.sign({ walletAddress }, SECRET_KEY, { expiresIn: '1d' }, (err, token) => {
+    if (err) throw err;
+    res.status(200).send({ token });
+  });
+};
+
 app.post('/verify', validateVerificationParameters, async (req, res, next) => {
   let address;
   try {
     address = ethers.verifyMessage(req.body.nonce, req.body.signedMessage);
     if (await walletAddressStored(path.join(DATA_DIR, `${address}.verified`))) {
-      return res.status(200).send({ signature: 'Verification successful' });
+      return await sendAuthToken(address, res);
     }
   } catch {
     return next(new HttpError('Incorrect input data', 400));
@@ -106,10 +115,25 @@ app.post('/verify', validateVerificationParameters, async (req, res, next) => {
 
   try {
     await storeWalletAddress(`${address}.verified`, req.body.nonce);
-    res.status(200).send({ signature: 'Verification successful' });
+    await sendAuthToken(address, res);
   } catch (err) {
     return next(err);
   }
+});
+
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.split(' ')[1];
+  if (token == null) return res.sendStatus(401);
+  jwt.verify(token, SECRET_KEY, (err) => {
+    if (err) return res.sendStatus(403);
+    next();
+  });
+};
+
+app.use(authenticateToken);
+app.get('/protected', (req, res) => {
+  res.send('Hello! You are viewing protected content.');
 });
 
 app.use((err, req, res, next) => {
