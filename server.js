@@ -94,18 +94,20 @@ const validateVerificationParameters = (req, res, next) => {
 };
 
 app.post('/verify', validateVerificationParameters, async (req, res, next) => {
+  let address;
   try {
-    const address = ethers.verifyMessage(req.body.nonce, req.body.signedMessage);
-
+    address = ethers.verifyMessage(req.body.nonce, req.body.signedMessage);
     if (await walletAddressStored(path.join(DATA_DIR, `${address}.verified`))) {
       return res.status(200).send({ signature: 'Verification successful' });
     }
+  } catch {
+    return next(new HttpError('Incorrect input data', 400));
+  }
+
+  try {
     await storeWalletAddress(`${address}.verified`, req.body.nonce);
     res.status(200).send({ signature: 'Verification successful' });
   } catch (err) {
-    if (err.code === 'INVALID_ARGUMENT') {
-      return next(new HttpError('Incorrect input data', 400));
-    }
     return next(err);
   }
 });
