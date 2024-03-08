@@ -3,11 +3,13 @@ const ethers = require('ethers');
 const crypto = require('crypto');
 const path = require('path');
 const { promises: fs } = require('fs');
+const cors = require('cors');
 const app = express();
 
 const PORT = process.env.PORT || 3005;
 const DATA_DIR = path.join(__dirname, 'data');
 
+app.use(cors());
 app.use(express.json());
 
 class HttpError extends Error {
@@ -84,9 +86,28 @@ app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
 
-app.post('/verify', async (req, res) => {
-  console.log('Verification successful');
-  res.status(200).send({ signature: 'Verification successful' });
+const validateVerificationParameters = (req, res, next) => {
+  if (!req.body.nonce || !req.body.signedMessage) {
+    return next(new HttpError('Invalid request', 400));
+  }
+  next();
+};
+
+app.post('/verify', validateVerificationParameters, async (req, res, next) => {
+  try {
+    const address = ethers.verifyMessage(req.body.nonce, req.body.signedMessage);
+
+    if (await walletAddressStored(path.join(DATA_DIR, `${address}.verified`))) {
+      return res.status(200).send({ signature: 'Verification successful' });
+    }
+    await storeWalletAddress(`${address}.verified`, req.body.nonce);
+    res.status(200).send({ signature: 'Verification successful' });
+  } catch (err) {
+    if (err.code === 'INVALID_ARGUMENT') {
+      return next(new HttpError('Incorrect input data', 400));
+    }
+    return next(err);
+  }
 });
 
 app.use((err, req, res, next) => {
