@@ -10,16 +10,26 @@ const DATA_DIR = path.join(__dirname, 'data');
 
 app.use(express.json());
 
-const validateWalletAddress = (req, res) => {
+class HttpError extends Error {
+  constructor(message, code) {
+    super(message);
+    this.code = code;
+  }
+}
+
+const validateWalletAddress = (req, res, next) => {
   if (!req.body.walletAddress) {
-    res.status(400).send({ message: 'Missing wallet address' });
-    return false;
+    return next(new HttpError('Missing wallet address', 400));
   }
   if (!ethers.isAddress(req.body.walletAddress)) {
-    res.status(400).send({ message: 'Invalid wallet address' });
-    return false;
+    return next(new HttpError('Invalid wallet address', 400));
   }
-  return true;
+  next();
+};
+
+const transformWalletAddress = (req, res, next) => {
+  req.body.walletAddress = req.body.walletAddress.toLowerCase();
+  next();
 };
 
 const walletAddressStored = async (filePath) => {
@@ -32,9 +42,9 @@ const walletAddressStored = async (filePath) => {
 };
 
 const generateRandomHexString = async () => {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     crypto.randomBytes(32, (err, buf) => {
-      if (err) throw err;
+      if (err) return reject(err);
       resolve(buf.toString('hex'));
     });
   });
@@ -50,25 +60,37 @@ const storeWalletAddress = async (fileName, fileContent) => {
   }
 };
 
-app.post('/signup', async (req, res) => {
-  if (!validateWalletAddress(req, res)) return;
-
-  const filePath = path.join(DATA_DIR, req.body.walletAddress.toLowerCase());
+app.post('/signup', validateWalletAddress, transformWalletAddress, async (req, res, next) => {
   try {
-    if (await walletAddressStored(filePath)) {
-      res.status(200).send({ signature: await fs.readFile(filePath, 'utf8') });
+    if (await walletAddressStored(path.join(DATA_DIR, `${req.body.walletAddress}.unverified`))) {
+      res.status(200).send({
+        nonce: await fs.readFile(
+          path.join(DATA_DIR, `${req.body.walletAddress}.unverified`),
+          'utf8'
+        ),
+      });
       return;
     }
 
-    const randomBytes = await generateRandomHexString();
-    await storeWalletAddress(req.body.walletAddress.toLowerCase(), randomBytes);
-
-    res.status(200).send({ signature: randomBytes });
+    const nonce = await generateRandomHexString();
+    await storeWalletAddress(`${req.body.walletAddress}.unverified`, nonce);
+    res.status(200).send({ nonce });
   } catch (err) {
-    res.status(500).send({ message: err.message });
+    next(err);
   }
 });
 
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
+});
+
+app.post('/verify', async (req, res) => {
+  console.log('Verification successful');
+  res.status(200).send({ signature: 'Verification successful' });
+});
+
+app.use((err, req, res, next) => {
+  const status = err.code || 500;
+  const message = err.message || 'Something went wrong';
+  res.status(status).send(message);
 });
