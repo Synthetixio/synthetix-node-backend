@@ -53,13 +53,8 @@ const generateRandomHexString = async () => {
 };
 
 const storeWalletAddress = async (fileName, fileContent) => {
-  try {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    await fs.writeFile(path.join(DATA_DIR, fileName), fileContent);
-  } catch (error) {
-    console.error(`Failed to save data to file: ${error}`);
-    throw error;
-  }
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  await fs.writeFile(path.join(DATA_DIR, fileName), fileContent);
 };
 
 app.post('/signup', validateWalletAddress, transformWalletAddress, async (req, res, next) => {
@@ -93,24 +88,38 @@ const validateVerificationParameters = (req, res, next) => {
   next();
 };
 
-app.post('/verify', validateVerificationParameters, async (req, res, next) => {
-  let address;
+const verifyMessage = async (req, res, next) => {
   try {
-    address = ethers.verifyMessage(req.body.nonce, req.body.signedMessage);
-    if (await walletAddressStored(path.join(DATA_DIR, `${address}.verified`))) {
-      return res.status(200).send({ signature: 'Verification successful' });
-    }
+    const address = ethers.verifyMessage(req.body.nonce, req.body.signedMessage);
+    const storedNonce = await fs.readFile(path.join(DATA_DIR, `${address}.unverified`), 'utf8');
+    if (storedNonce !== req.body.nonce) throw new Error();
+    res.locals.address = address;
+    next();
   } catch {
-    return next(new HttpError('Incorrect input data', 400));
+    next(new HttpError('Incorrect input data', 400));
   }
+};
 
-  try {
-    await storeWalletAddress(`${address}.verified`, req.body.nonce);
-    res.status(200).send({ signature: 'Verification successful' });
-  } catch (err) {
-    return next(err);
+const manageWalletAddressStorage = async (req, res, next) => {
+  if (!(await walletAddressStored(path.join(DATA_DIR, `${res.locals.address}.verified`)))) {
+    await storeWalletAddress(`${res.locals.address}.verified`, req.body.nonce);
   }
-});
+  next();
+};
+
+app.post(
+  '/verify',
+  validateVerificationParameters,
+  verifyMessage,
+  manageWalletAddressStorage,
+  async (req, res, next) => {
+    try {
+      res.status(200).send({ signature: 'Verification successful' });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 app.use((err, req, res, next) => {
   const status = err.code || 500;
