@@ -6,10 +6,10 @@ const { promises: fs } = require('fs');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const app = express();
+require('dotenv').config();
 
 const PORT = process.env.PORT || 3005;
 const DATA_DIR = path.join(__dirname, 'data');
-const SECRET_KEY = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
 
 app.use(cors());
 app.use(express.json());
@@ -90,13 +90,6 @@ const validateVerificationParameters = (req, res, next) => {
   next();
 };
 
-const sendAuthToken = async (walletAddress, res) => {
-  jwt.sign({ walletAddress }, SECRET_KEY, { expiresIn: '1d' }, (err, token) => {
-    if (err) throw err;
-    res.status(200).send({ token });
-  });
-};
-
 const verifyMessage = async (req, res, next) => {
   try {
     const address = ethers.verifyMessage(req.body.nonce, req.body.signedMessage);
@@ -116,6 +109,15 @@ const manageWalletAddressStorage = async (req, res, next) => {
   next();
 };
 
+const createJwtToken = async (walletAddress) => {
+  return new Promise((resolve, reject) => {
+    jwt.sign({ walletAddress }, process.env.SECRET_KEY, { expiresIn: '1d' }, (err, token) => {
+      if (err) reject(err);
+      resolve(token);
+    });
+  });
+};
+
 app.post(
   '/verify',
   validateVerificationParameters,
@@ -123,7 +125,7 @@ app.post(
   manageWalletAddressStorage,
   async (req, res, next) => {
     try {
-      await sendAuthToken(address, res);
+      res.status(200).send({ token: await createJwtToken(res.locals.address) });
     } catch (err) {
       next(err);
     }
@@ -134,7 +136,7 @@ const authenticateToken = (req, res, next) => {
   const authHeader = req.headers.authorization;
   const token = authHeader?.split(' ')[1];
   if (token == null) return res.sendStatus(401);
-  jwt.verify(token, SECRET_KEY, (err) => {
+  jwt.verify(token, process.env.SECRET_KEY, (err) => {
     if (err) return res.sendStatus(403);
     next();
   });
