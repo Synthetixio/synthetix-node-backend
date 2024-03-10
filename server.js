@@ -4,7 +4,9 @@ const crypto = require('crypto');
 const path = require('path');
 const { promises: fs } = require('fs');
 const cors = require('cors');
+const jwt = require('jsonwebtoken');
 const app = express();
+require('dotenv').config();
 
 const PORT = process.env.PORT || 3005;
 const DATA_DIR = path.join(__dirname, 'data');
@@ -107,6 +109,15 @@ const manageWalletAddressStorage = async (req, res, next) => {
   next();
 };
 
+const createJwtToken = async (walletAddress) => {
+  return new Promise((resolve, reject) => {
+    jwt.sign({ walletAddress }, process.env.JWT_SECRET_KEY, { expiresIn: '1d' }, (err, token) => {
+      if (err) reject(err);
+      resolve(token);
+    });
+  });
+};
+
 app.post(
   '/verify',
   validateVerificationParameters,
@@ -114,12 +125,27 @@ app.post(
   manageWalletAddressStorage,
   async (req, res, next) => {
     try {
-      res.status(200).send({ signature: 'Verification successful' });
+      res.status(200).send({ token: await createJwtToken(res.locals.address) });
     } catch (err) {
       next(err);
     }
   }
 );
+
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.split(' ')[1];
+  if (token == null) return res.sendStatus(401);
+  jwt.verify(token, process.env.JWT_SECRET_KEY, (err) => {
+    if (err) return res.sendStatus(403);
+    next();
+  });
+};
+
+app.use(authenticateToken);
+app.get('/protected', (req, res) => {
+  res.send('Hello! You are viewing protected content.');
+});
 
 app.use((err, req, res, next) => {
   const status = err.code || 500;
