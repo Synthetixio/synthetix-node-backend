@@ -84,22 +84,31 @@ app.listen(PORT, () => {
 });
 
 const validateVerificationParameters = (req, res, next) => {
-  if (!req.body.nonce || !req.body.signedMessage) {
-    return next(new HttpError('Invalid request', 400));
+  if (!req.body.nonce) {
+    return next(new HttpError('Nonce not provided', 400));
+  }
+  if (!req.body.signedMessage) {
+    return next(new HttpError('Signed message not provided', 400));
   }
   next();
 };
 
 const verifyMessage = async (req, res, next) => {
+  let address;
+  let storedNonce;
   try {
-    const address = ethers.verifyMessage(req.body.nonce, req.body.signedMessage);
-    const storedNonce = await fs.readFile(path.join(DATA_DIR, `${address}.unverified`), 'utf8');
-    if (storedNonce !== req.body.nonce) throw new Error();
-    res.locals.address = address;
-    next();
+    address = ethers.verifyMessage(req.body.nonce, req.body.signedMessage);
   } catch {
-    next(new HttpError('Incorrect input data', 400));
+    return next(new HttpError('Failed to verify message', 400));
   }
+  try {
+    storedNonce = await fs.readFile(path.join(DATA_DIR, `${address}.unverified`), 'utf8');
+  } catch (err) {
+    return next(err);
+  }
+  if (storedNonce !== req.body.nonce) return next(new HttpError('Nonce mismatch', 400));
+  res.locals.address = address;
+  next();
 };
 
 const manageWalletAddressStorage = async (req, res, next) => {
