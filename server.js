@@ -106,7 +106,9 @@ const verifyMessage = async (req, res, next) => {
   } catch (err) {
     return next(err);
   }
-  if (storedNonce !== req.body.nonce) return next(new HttpError('Nonce mismatch', 400));
+  if (storedNonce !== req.body.nonce) {
+    return next(new HttpError('Nonce mismatch', 400));
+  }
   res.locals.address = address;
   next();
 };
