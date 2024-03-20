@@ -3,6 +3,7 @@ const ethers = require('ethers');
 const crypto = require('crypto');
 const path = require('path');
 const { promises: fs } = require('fs');
+const proxy = require('express-http-proxy');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const app = express();
@@ -10,6 +11,10 @@ require('dotenv').config();
 
 const PORT = process.env.PORT || 3005;
 const DATA_DIR = path.join(__dirname, 'data');
+
+const IPFS_HOST = process.env.IPFS_HOST || '127.0.0.1';
+const IPFS_PORT = process.env.IPFS_PORT || '5001';
+const IPFS_URL = `http://${IPFS_HOST}:${IPFS_PORT}/`;
 
 app.use(cors());
 app.use(express.json());
@@ -141,6 +146,20 @@ app.post(
       next(err);
     }
   }
+);
+
+app.use(
+  '/api/v0/cat',
+  proxy(IPFS_URL, {
+    proxyReqPathResolver: (req) => req.originalUrl,
+    userResDecorator: (proxyRes, proxyResData, userReq, userRes) => {
+      const imageBuffer = Buffer.from(proxyResData, 'binary');
+      const base64Image = imageBuffer.toString('base64');
+      userRes.set('TE', 'trailers');
+      userRes.set('Transfer-Encoding', 'chunked');
+      return `data:${proxyRes.headers['content-type']};base64,${base64Image}`;
+    },
+  })
 );
 
 const authenticateToken = (req, res, next) => {
