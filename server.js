@@ -84,32 +84,9 @@ app.post('/signup', validateWalletAddress, transformWalletAddress, async (req, r
   }
 });
 
-const setIpfsConfig = async (config, value) => {
-  try {
-    const response = await fetch(`${IPFS_URL}api/v0/config?arg=${config}&arg=${value}&json=true`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    });
-
-    if (!response.ok) throw new Error('Failed to set config');
-
-    const data = await response.json();
-    console.log(`IPFS config set: ${data.Key} to ${data.Value}`);
-  } catch (err) {
-    console.error(`Error setting ${config}:`, err.message);
-  }
-};
-
-Promise.all([
-  setIpfsConfig('API.HTTPHeaders.Access-Control-Allow-Origin', '["*"]'),
-  setIpfsConfig('API.HTTPHeaders.Access-Control-Allow-Methods', '["PUT", "POST", "GET"]'),
-])
-  .then(() => {
-    app.listen(PORT, () => {
-      console.log(`Server is running on port ${PORT}`);
-    });
-  })
-  .catch((error) => console.log(error.message));
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});
 
 const validateVerificationParameters = (req, res, next) => {
   if (!req.body.nonce) {
