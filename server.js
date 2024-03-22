@@ -3,11 +3,11 @@ const ethers = require('ethers');
 const crypto = require('crypto');
 const path = require('path');
 const { promises: fs } = require('fs');
-const proxy = require('express-http-proxy');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const app = express();
 require('dotenv').config();
+const { createProxyMiddleware } = require('http-proxy-middleware');
 
 const PORT = process.env.PORT || 3005;
 const DATA_DIR = path.join(__dirname, 'data');
@@ -148,19 +148,7 @@ app.post(
   }
 );
 
-app.use(
-  '/api/v0/cat',
-  proxy(IPFS_URL, {
-    proxyReqPathResolver: (req) => req.originalUrl,
-    userResDecorator: (proxyRes, proxyResData, userReq, userRes) => {
-      const imageBuffer = Buffer.from(proxyResData, 'binary');
-      const base64Image = imageBuffer.toString('base64');
-      userRes.set('TE', 'trailers');
-      userRes.set('Transfer-Encoding', 'chunked');
-      return `data:${proxyRes.headers['content-type']};base64,${base64Image}`;
-    },
-  })
-);
+app.use('/api/v0/cat', createProxyMiddleware({ target: IPFS_URL }));
 
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -172,10 +160,11 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-app.use(authenticateToken);
-app.get('/protected', (req, res) => {
+app.get('/protected', authenticateToken, (req, res) => {
   res.send('Hello! You are viewing protected content.');
 });
+
+app.use('/api/v0/add', authenticateToken, createProxyMiddleware({ target: IPFS_URL }));
 
 app.use((err, req, res, next) => {
   const status = err.code || 500;
