@@ -8,7 +8,6 @@ const jwt = require('jsonwebtoken');
 const app = express();
 require('dotenv').config();
 const { createProxyMiddleware } = require('http-proxy-middleware');
-const multer = require('multer');
 
 const PORT = process.env.PORT || 3005;
 const DATA_DIR = path.join(__dirname, 'data');
@@ -149,26 +148,7 @@ app.post(
   }
 );
 
-app.use(
-  '/api/v0/cat',
-  createProxyMiddleware({
-    target: IPFS_URL,
-    selfHandleResponse: true,
-    onProxyRes: (proxyRes, req, res) => {
-      const body = [];
-      proxyRes.on('data', (chunk) => {
-        body.push(chunk);
-      });
-      proxyRes.on('end', () => {
-        const imageBuffer = Buffer.concat(body);
-        const base64Image = imageBuffer.toString('base64');
-        res.set('TE', 'trailers');
-        res.set('Transfer-Encoding', 'chunked');
-        res.send(`data:${proxyRes.headers['content-type']};base64,${base64Image}`);
-      });
-    },
-  })
-);
+app.use('/api/v0/cat', createProxyMiddleware({ target: IPFS_URL }));
 
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -185,24 +165,7 @@ app.get('/protected', (req, res) => {
   res.send('Hello! You are viewing protected content.');
 });
 
-const FormData = require('form-data');
-const upload = multer();
-app.use('/api/v0/add', upload.single('file'), async (req, res, next) => {
-  const formData = new FormData();
-
-  formData.append(req.file.fieldname, req.file.buffer, {
-    filename: req.file.fieldname,
-    contentType: 'application/octet-stream',
-  });
-
-  createProxyMiddleware({
-    target: IPFS_URL,
-    onProxyReq: (proxyReq) => {
-      proxyReq.setHeader('Content-Type', formData.getHeaders()['content-type']);
-      formData.pipe(proxyReq);
-    },
-  })(req, res, next);
-});
+app.use('/api/v0/add', createProxyMiddleware({ target: IPFS_URL }));
 
 app.use((err, req, res, next) => {
   const status = err.code || 500;
