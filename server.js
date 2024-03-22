@@ -160,12 +160,11 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-app.use(authenticateToken);
-app.get('/protected', (req, res) => {
+app.get('/protected', authenticateToken, (req, res) => {
   res.send('Hello! You are viewing protected content.');
 });
 
-app.use('/api/v0/add', createProxyMiddleware({ target: IPFS_URL }));
+app.use('/api/v0/add', authenticateToken, createProxyMiddleware({ target: IPFS_URL }));
 
 app.use((err, req, res, next) => {
   const status = err.code || 500;
