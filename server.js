@@ -2,7 +2,6 @@ const express = require('express');
 const { ethers, JsonRpcProvider, Contract } = require('ethers');
 const { address, abi } = require('@vderunov/whitelist-contract/deployments/11155420/Whitelist');
 const crypto = require('crypto');
-const { promises: fs } = require('fs');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const app = express();
@@ -151,8 +150,8 @@ const authenticateToken = async (req, res, next) => {
   } catch (err) {
     if (err.message === 'Token is missing') return res.sendStatus(401);
     if (err instanceof jwt.JsonWebTokenError) return res.sendStatus(403);
-    if (err instanceof EthereumContractError) return res.status(500).send(err.message);
-    return res.status(500).send(err);
+    if (err instanceof EthereumContractError) return next(err);
+    return next(err);
   }
 };
 
