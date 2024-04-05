@@ -127,11 +127,11 @@ app.use('/api/v0/cat', createProxyMiddleware({ target: IPFS_URL }));
 const verifyToken = (req) => {
   const authHeader = req.headers.authorization;
   const token = authHeader?.split(' ')[1];
-  if (token == null) throw new Error('Token is missing');
+  if (token == null) throw new HttpError('Unauthorized', 401);
 
   return new Promise((resolve, reject) => {
     jwt.verify(token, process.env.JWT_SECRET_KEY, (err, decoded) => {
-      if (err) reject(err);
+      if (err) reject(new HttpError('Forbidden', 403));
       resolve(decoded);
     });
   });
@@ -142,14 +142,11 @@ const authenticateToken = async (req, res, next) => {
     const decoded = await verifyToken(req);
     const contract = await getEthereumContract();
     if (!(await contract.isGranted(decoded.walletAddress))) {
-      return next(new HttpError('Unauthorized', 401));
+      throw new HttpError('Unauthorized', 401);
     }
     next();
   } catch (err) {
-    if (err.message === 'Token is missing') return next(new HttpError('Unauthorized', 401));
-    if (err instanceof jwt.JsonWebTokenError) next(new HttpError('Forbidden', 403));
-    if (err instanceof EthereumContractError) return next(err);
-    return next(err);
+    next(err);
   }
 };
 
