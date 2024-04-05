@@ -58,9 +58,7 @@ const transformWalletAddress = (req, res, next) => {
 
 const createNonce = async (req, res, next) => {
   try {
-    const hash = crypto.createHash('sha1');
-    hash.update(`${req.body.walletAddress}:${process.env.SECRET}`);
-    res.status(200).send({ nonce: hash.digest('hex') });
+    res.status(200).send({ nonce: generateNonce(req.body.walletAddress) });
   } catch (err) {
     next(err);
   }
@@ -144,12 +142,12 @@ const authenticateToken = async (req, res, next) => {
     const decoded = await verifyToken(req);
     const contract = await getEthereumContract();
     if (!(await contract.isGranted(decoded.walletAddress))) {
-      return res.sendStatus(401);
+      return next(new HttpError('Unauthorized', 401));
     }
     next();
   } catch (err) {
-    if (err.message === 'Token is missing') return res.sendStatus(401);
-    if (err instanceof jwt.JsonWebTokenError) return res.sendStatus(403);
+    if (err.message === 'Token is missing') return next(new HttpError('Unauthorized', 401));
+    if (err instanceof jwt.JsonWebTokenError) next(new HttpError('Forbidden', 403));
     if (err instanceof EthereumContractError) return next(err);
     return next(err);
   }
