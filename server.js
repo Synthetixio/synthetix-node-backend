@@ -56,6 +56,12 @@ const transformWalletAddress = (req, res, next) => {
   next();
 };
 
+const generateNonce = (address) => {
+  const checkHash = crypto.createHash('sha1');
+  checkHash.update(`${address.toLowerCase()}:${process.env.SECRET}`);
+  return checkHash.digest('hex');
+};
+
 const createNonce = async (req, res, next) => {
   try {
     res.status(200).send({ nonce: generateNonce(req.body.walletAddress) });
@@ -86,12 +92,6 @@ const getAddressFromMessage = (nonce, signedMessage, next) => {
   } catch {
     return next(new HttpError('Failed to verify message', 400));
   }
-};
-
-const generateNonce = (address) => {
-  const checkHash = crypto.createHash('sha1');
-  checkHash.update(`${address.toLowerCase()}:${process.env.SECRET}`);
-  return checkHash.digest('hex');
 };
 
 const verifyMessage = async (req, res, next) => {
