@@ -1,8 +1,7 @@
 const express = require('express');
-const ethers = require('ethers');
+const { ethers, JsonRpcProvider, Contract } = require('ethers');
+const { address, abi } = require('@vderunov/whitelist-contract/deployments/11155420/Whitelist');
 const crypto = require('crypto');
-const path = require('path');
-const { promises: fs } = require('fs');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const app = express();
@@ -10,7 +9,6 @@ require('dotenv').config();
 const { createProxyMiddleware } = require('http-proxy-middleware');
 
 const PORT = process.env.PORT || 3005;
-const DATA_DIR = path.join(__dirname, 'data');
 
 const IPFS_HOST = process.env.IPFS_HOST || '127.0.0.1';
 const IPFS_PORT = process.env.IPFS_PORT || '5001';
@@ -25,6 +23,23 @@ class HttpError extends Error {
     this.code = code;
   }
 }
+
+class EthereumContractError extends Error {
+  constructor(message, originalError) {
+    super(message);
+    this.name = 'EthereumContractError';
+    this.originalError = originalError;
+  }
+}
+
+const getEthereumContract = () => {
+  try {
+    const provider = new JsonRpcProvider('https://sepolia.optimism.io');
+    return new Contract(address, abi, provider);
+  } catch (err) {
+    throw new EthereumContractError('Failed to get Ethereum contract', err);
+  }
+};
 
 const validateWalletAddress = (req, res, next) => {
   if (!req.body.walletAddress) {
@@ -41,48 +56,21 @@ const transformWalletAddress = (req, res, next) => {
   next();
 };
 
-const walletAddressStored = async (filePath) => {
+const generateNonce = (address) => {
+  const checkHash = crypto.createHash('sha1');
+  checkHash.update(`${address.toLowerCase()}:${process.env.SECRET}`);
+  return checkHash.digest('hex');
+};
+
+const createNonce = async (req, res, next) => {
   try {
-    await fs.access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const generateRandomHexString = async () => {
-  return new Promise((resolve, reject) => {
-    crypto.randomBytes(32, (err, buf) => {
-      if (err) return reject(err);
-      resolve(buf.toString('hex'));
-    });
-  });
-};
-
-const storeWalletAddress = async (fileName, fileContent) => {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  await fs.writeFile(path.join(DATA_DIR, fileName), fileContent);
-};
-
-app.post('/signup', validateWalletAddress, transformWalletAddress, async (req, res, next) => {
-  try {
-    if (await walletAddressStored(path.join(DATA_DIR, `${req.body.walletAddress}.unverified`))) {
-      res.status(200).send({
-        nonce: await fs.readFile(
-          path.join(DATA_DIR, `${req.body.walletAddress}.unverified`),
-          'utf8'
-        ),
-      });
-      return;
-    }
-
-    const nonce = await generateRandomHexString();
-    await storeWalletAddress(`${req.body.walletAddress}.unverified`, nonce);
-    res.status(200).send({ nonce });
+    res.status(200).send({ nonce: generateNonce(req.body.walletAddress) });
   } catch (err) {
     next(err);
   }
-});
+};
+
+app.post('/signup', validateWalletAddress, transformWalletAddress, createNonce);
 
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
@@ -98,30 +86,22 @@ const validateVerificationParameters = (req, res, next) => {
   next();
 };
 
-const verifyMessage = async (req, res, next) => {
-  let address;
-  let storedNonce;
+const getAddressFromMessage = (nonce, signedMessage, next) => {
   try {
-    address = ethers.verifyMessage(req.body.nonce, req.body.signedMessage);
+    return ethers.verifyMessage(nonce, signedMessage);
   } catch {
     return next(new HttpError('Failed to verify message', 400));
   }
-  try {
-    storedNonce = await fs.readFile(path.join(DATA_DIR, `${address}.unverified`), 'utf8');
-  } catch (err) {
-    return next(err);
-  }
-  if (storedNonce !== req.body.nonce) {
+};
+
+const verifyMessage = async (req, res, next) => {
+  const address = getAddressFromMessage(req.body.nonce, req.body.signedMessage, next);
+  const newNonce = generateNonce(address);
+
+  if (req.body.nonce !== newNonce) {
     return next(new HttpError('Nonce mismatch', 400));
   }
   res.locals.address = address;
-  next();
-};
-
-const manageWalletAddressStorage = async (req, res, next) => {
-  if (!(await walletAddressStored(path.join(DATA_DIR, `${res.locals.address}.verified`)))) {
-    await storeWalletAddress(`${res.locals.address}.verified`, req.body.nonce);
-  }
   next();
 };
 
@@ -134,30 +114,40 @@ const createJwtToken = async (walletAddress) => {
   });
 };
 
-app.post(
-  '/verify',
-  validateVerificationParameters,
-  verifyMessage,
-  manageWalletAddressStorage,
-  async (req, res, next) => {
-    try {
-      res.status(200).send({ token: await createJwtToken(res.locals.address) });
-    } catch (err) {
-      next(err);
-    }
+app.post('/verify', validateVerificationParameters, verifyMessage, async (req, res, next) => {
+  try {
+    res.status(200).send({ token: await createJwtToken(res.locals.address) });
+  } catch (err) {
+    next(err);
   }
-);
+});
 
 app.use('/api/v0/cat', createProxyMiddleware({ target: IPFS_URL }));
 
-const authenticateToken = (req, res, next) => {
+const verifyToken = (req) => {
   const authHeader = req.headers.authorization;
   const token = authHeader?.split(' ')[1];
-  if (token == null) return res.sendStatus(401);
-  jwt.verify(token, process.env.JWT_SECRET_KEY, (err) => {
-    if (err) return res.sendStatus(403);
-    next();
+  if (token == null) throw new HttpError('Unauthorized', 401);
+
+  return new Promise((resolve, reject) => {
+    jwt.verify(token, process.env.JWT_SECRET_KEY, (err, decoded) => {
+      if (err) reject(new HttpError('Forbidden', 403));
+      resolve(decoded);
+    });
   });
+};
+
+const authenticateToken = async (req, res, next) => {
+  try {
+    const decoded = await verifyToken(req);
+    const contract = await getEthereumContract();
+    if (!(await contract.isGranted(decoded.walletAddress))) {
+      throw new HttpError('Unauthorized', 401);
+    }
+    next();
+  } catch (err) {
+    next(err);
+  }
 };
 
 app.get('/protected', authenticateToken, (req, res) => {
