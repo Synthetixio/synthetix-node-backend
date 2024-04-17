@@ -1,12 +1,13 @@
 const express = require('express');
 const { ethers, JsonRpcProvider, Contract } = require('ethers');
 const { address, abi } = require('@vderunov/whitelist-contract/deployments/11155420/Whitelist');
-const crypto = require('crypto');
+const crypto = require('node:crypto');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const app = express();
 require('dotenv').config();
 const { createProxyMiddleware } = require('http-proxy-middleware');
+const https = require('node:https');
 
 const PORT = process.env.PORT || 3005;
 
@@ -122,7 +123,15 @@ app.post('/verify', validateVerificationParameters, verifyMessage, async (req, r
   }
 });
 
-app.use('/api/v0/cat', createProxyMiddleware({ target: IPFS_URL }));
+app.use(
+  '/api/v0/cat',
+  createProxyMiddleware({
+    target: `${IPFS_URL}/api/v0/cat`,
+    pathRewrite: {
+      '^/': '',
+    },
+  })
+);
 
 const verifyToken = (req) => {
   const authHeader = req.headers.authorization;
@@ -154,7 +163,79 @@ app.get('/protected', authenticateToken, (req, res) => {
   res.send('Hello! You are viewing protected content.');
 });
 
-app.use('/api/v0/add', authenticateToken, createProxyMiddleware({ target: IPFS_URL }));
+app.use(
+  '/api/v0/add',
+  authenticateToken,
+  createProxyMiddleware({ target: `${IPFS_URL}/api/v0/add` })
+);
+
+const queryTheGraphStudioAPI = (query, callback) => {
+  const data = JSON.stringify({ query });
+
+  const options = {
+    hostname: 'api.studio.thegraph.com',
+    port: 443,
+    path: '/query/71164/vd-practice-v1/version/latest',
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': data.length,
+    },
+  };
+
+  const req = https.request(options, (res) => {
+    let data = '';
+
+    res.on('data', (chunk) => {
+      data += chunk;
+    });
+
+    res.on('end', () => {
+      callback(null, JSON.parse(data));
+    });
+
+    req.on('error', callback);
+  });
+
+  req.write(data);
+  req.end();
+};
+
+app.get('/approved-wallets', (req, res, next) => {
+  const query = `
+    {
+      wallets(where: { granted: true }) {
+        id
+      }
+    }
+  `;
+
+  queryTheGraphStudioAPI(query, (err, data) => {
+    if (err) {
+      next(new HttpError('Error querying approved wallets with TheGraph Studio API', 500));
+    } else {
+      res.status(200).send(data);
+    }
+  });
+});
+
+app.get('/submitted-wallets', (req, res, next) => {
+  const query = `
+    {
+      wallets(where: { pending: true }) {
+        id
+      }
+    }
+  `;
+
+  queryTheGraphStudioAPI(query, (err, data) => {
+    if (err) {
+      next(new HttpError('Error querying submitted wallets with TheGraph Studio API', 500));
+    } else {
+      res.status(200).send(data);
+    }
+  });
+});
 
 app.use((err, req, res, next) => {
   const status = err.code || 500;
