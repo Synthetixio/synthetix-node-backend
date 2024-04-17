@@ -169,6 +169,19 @@ app.use(
   createProxyMiddleware({ target: `${IPFS_URL}/api/v0/add` })
 );
 
+const authenticateAdmin = async (req, res, next) => {
+  try {
+    const decoded = await verifyToken(req);
+    const contract = await getEthereumContract();
+    if (!(await contract.isAdmin(decoded.walletAddress))) {
+      throw new HttpError('Unauthorized', 401);
+    }
+    next();
+  } catch (err) {
+    next(err);
+  }
+};
+
 const queryTheGraphStudioAPI = (query, callback) => {
   const data = JSON.stringify({ query });
 
@@ -201,7 +214,7 @@ const queryTheGraphStudioAPI = (query, callback) => {
   req.end();
 };
 
-app.get('/approved-wallets', (req, res, next) => {
+app.get('/approved-wallets', authenticateAdmin, (req, res, next) => {
   const query = `
     {
       wallets(where: { granted: true }) {
@@ -219,7 +232,7 @@ app.get('/approved-wallets', (req, res, next) => {
   });
 });
 
-app.get('/submitted-wallets', (req, res, next) => {
+app.get('/submitted-wallets', authenticateAdmin, (req, res, next) => {
   const query = `
     {
       wallets(where: { pending: true }) {
