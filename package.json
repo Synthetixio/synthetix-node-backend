@@ -9,16 +9,16 @@
     "lint": "biome check --apply ."
   },
   "dependencies": {
-    "@vderunov/whitelist-contract": "^1.0.0",
+    "@vderunov/whitelist-contract": "^2.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "ethers": "^6.11.1",
-    "express": "^4.18.3",
-    "http-proxy-middleware": "^2.0.6",
+    "ethers": "^6.12.0",
+    "express": "^4.19.2",
+    "http-proxy-middleware": "^3.0.0",
     "jsonwebtoken": "^9.0.2"
   },
   "devDependencies": {
-    "@biomejs/biome": "1.5.3",
+    "@biomejs/biome": "1.7.0",
     "nodemon": "^3.1.0"
   }
 }

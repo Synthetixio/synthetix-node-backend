@@ -1,18 +1,21 @@
 const express = require('express');
 const { ethers, JsonRpcProvider, Contract } = require('ethers');
 const { address, abi } = require('@vderunov/whitelist-contract/deployments/11155420/Whitelist');
-const crypto = require('crypto');
+const crypto = require('node:crypto');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const app = express();
 require('dotenv').config();
 const { createProxyMiddleware } = require('http-proxy-middleware');
+const https = require('node:https');
 
 const PORT = process.env.PORT || 3005;
 
 const IPFS_HOST = process.env.IPFS_HOST || '127.0.0.1';
 const IPFS_PORT = process.env.IPFS_PORT || '5001';
 const IPFS_URL = `http://${IPFS_HOST}:${IPFS_PORT}/`;
+const GRAPH_API_ENDPOINT =
+  'https://api.studio.thegraph.com/query/71164/vd-practice-v1/version/latest';
 
 app.use(cors());
 app.use(express.json());
@@ -122,7 +125,15 @@ app.post('/verify', validateVerificationParameters, verifyMessage, async (req, r
   }
 });
 
-app.use('/api/v0/cat', createProxyMiddleware({ target: IPFS_URL }));
+app.use(
+  '/api/v0/cat',
+  createProxyMiddleware({
+    target: `${IPFS_URL}/api/v0/cat`,
+    pathRewrite: {
+      '^/': '',
+    },
+  })
+);
 
 const verifyToken = (req) => {
   const authHeader = req.headers.authorization;
@@ -154,7 +165,80 @@ app.get('/protected', authenticateToken, (req, res) => {
   res.send('Hello! You are viewing protected content.');
 });
 
-app.use('/api/v0/add', authenticateToken, createProxyMiddleware({ target: IPFS_URL }));
+app.use(
+  '/api/v0/add',
+  authenticateToken,
+  createProxyMiddleware({ target: `${IPFS_URL}/api/v0/add` })
+);
+
+const authenticateAdmin = async (req, res, next) => {
+  try {
+    const decoded = await verifyToken(req);
+    const contract = await getEthereumContract();
+    if (!(await contract.isAdmin(decoded.walletAddress))) {
+      throw new HttpError('Unauthorized', 401);
+    }
+    next();
+  } catch (err) {
+    next(err);
+  }
+};
+
+const fetchApprovedWallets = async () => {
+  const response = await fetch(GRAPH_API_ENDPOINT, {
+    method: 'POST',
+    body: JSON.stringify({
+      query: `
+    {
+      wallets(where: { granted: true }) {
+        id
+      }
+    }
+  `,
+    }),
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!response.ok) {
+    throw new HttpError('Error querying approved wallets with TheGraph Studio API', 500);
+  }
+  return response.json();
+};
+
+app.get('/approved-wallets', authenticateAdmin, async (req, res, next) => {
+  try {
+    res.status(200).send(await fetchApprovedWallets());
+  } catch (err) {
+    next(err);
+  }
+});
+
+const fetchSubmittedWallets = async () => {
+  const response = await fetch(GRAPH_API_ENDPOINT, {
+    method: 'POST',
+    body: JSON.stringify({
+      query: `
+    {
+      wallets(where: { pending: true }) {
+        id
+      }
+    }
+  `,
+    }),
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!response.ok) {
+    throw new HttpError('Error querying submitted wallets with TheGraph Studio API', 500);
+  }
+  return response.json();
+};
+
+app.get('/submitted-wallets', authenticateAdmin, async (req, res, next) => {
+  try {
+    res.status(200).send(await fetchSubmittedWallets());
+  } catch (err) {
+    next(err);
+  }
+});
 
 app.use((err, req, res, next) => {
   const status = err.code || 500;
