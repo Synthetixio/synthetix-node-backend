@@ -14,6 +14,8 @@ const PORT = process.env.PORT || 3005;
 const IPFS_HOST = process.env.IPFS_HOST || '127.0.0.1';
 const IPFS_PORT = process.env.IPFS_PORT || '5001';
 const IPFS_URL = `http://${IPFS_HOST}:${IPFS_PORT}/`;
+const GRAPH_API_ENDPOINT =
+  'https://api.studio.thegraph.com/query/71164/vd-practice-v1/version/latest';
 
 app.use(cors());
 app.use(express.json());
@@ -182,72 +184,60 @@ const authenticateAdmin = async (req, res, next) => {
   }
 };
 
-const queryTheGraphStudioAPI = (query, callback) => {
-  const data = JSON.stringify({ query });
-
-  const options = {
-    hostname: 'api.studio.thegraph.com',
-    port: 443,
-    path: '/query/71164/vd-practice-v1/version/latest',
+const fetchApprovedWallets = async () => {
+  const response = await fetch(GRAPH_API_ENDPOINT, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Content-Length': data.length,
-    },
-  };
-
-  const req = https.request(options, (res) => {
-    let data = '';
-
-    res.on('data', (chunk) => {
-      data += chunk;
-    });
-
-    res.on('end', () => {
-      callback(null, JSON.parse(data));
-    });
-
-    req.on('error', callback);
-  });
-
-  req.write(data);
-  req.end();
-};
-
-app.get('/approved-wallets', authenticateAdmin, (req, res, next) => {
-  const query = `
+    body: JSON.stringify({
+      query: `
     {
       wallets(where: { granted: true }) {
         id
       }
     }
-  `;
-
-  queryTheGraphStudioAPI(query, (err, data) => {
-    if (err) {
-      next(new HttpError('Error querying approved wallets with TheGraph Studio API', 500));
-    } else {
-      res.status(200).send(data);
-    }
+  `,
+    }),
+    headers: { 'Content-Type': 'application/json' },
   });
+  if (!response.ok) {
+    throw new HttpError('Error querying approved wallets with TheGraph Studio API', 500);
+  }
+  return response.json();
+};
+
+app.get('/approved-wallets', authenticateAdmin, async (req, res, next) => {
+  try {
+    res.status(200).send(await fetchApprovedWallets());
+  } catch (err) {
+    next(err);
+  }
 });
 
-app.get('/submitted-wallets', authenticateAdmin, (req, res, next) => {
-  const query = `
+const fetchSubmittedWallets = async () => {
+  const response = await fetch(GRAPH_API_ENDPOINT, {
+    method: 'POST',
+    body: JSON.stringify({
+      query: `
     {
       wallets(where: { pending: true }) {
         id
       }
     }
-  `;
-
-  queryTheGraphStudioAPI(query, (err, data) => {
-    if (err) {
-      next(new HttpError('Error querying submitted wallets with TheGraph Studio API', 500));
-    } else {
-      res.status(200).send(data);
-    }
+  `,
+    }),
+    headers: { 'Content-Type': 'application/json' },
   });
+  if (!response.ok) {
+    throw new HttpError('Error querying submitted wallets with TheGraph Studio API', 500);
+  }
+  return response.json();
+};
+
+app.get('/submitted-wallets', authenticateAdmin, async (req, res, next) => {
+  try {
+    res.status(200).send(await fetchSubmittedWallets());
+  } catch (err) {
+    next(err);
+  }
 });
 
 app.use((err, req, res, next) => {
