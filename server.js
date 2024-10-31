@@ -16,7 +16,7 @@ const IPFS_URL = `http://${IPFS_HOST}:${IPFS_PORT}/`;
 const GRAPH_API_ENDPOINT =
   'https://api.studio.thegraph.com/query/71164/vd-practice-v1/version/latest';
 
-app.use(cors({ origin: ['http://45.146.7.38:3005', 'http://localhost:3000', 'http://localhost:3005'] }));
+app.use(cors({ origin: '*' }));
 app.use(express.json());
 
 class HttpError extends Error {
