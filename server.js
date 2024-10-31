@@ -16,8 +16,8 @@ const IPFS_URL = `http://${IPFS_HOST}:${IPFS_PORT}/`;
 const GRAPH_API_ENDPOINT =
   'https://api.studio.thegraph.com/query/71164/vd-practice-v1/version/latest';
 
-app.use(cors({ origin: '*'  }));
-app.options('*', cors({ origin: '*'  }));
+app.use(cors({ origin: '*', preflightContinue: true }));
+app.options('*', cors({ origin: '*' }));
 app.use(express.json());
 
 class HttpError extends Error {
