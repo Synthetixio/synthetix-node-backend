@@ -200,9 +200,8 @@ app.use(
       const results = await Promise.all(
         req.files.map(async (file) => {
           const formData = new FormData();
-          // TODO: Fix: now an empty object is being added to IPFS, need to fix it
-          formData.append('file', file);
-
+          const fileBlob = new Blob([file.buffer], { type: file.mimetype });
+          formData.append('file', fileBlob, file.originalname);
           const response = await fetch(
             `${IPFS_URL}api/v0/add?to-files=/project1/dist/${file.originalname}`,
             {
@@ -217,7 +216,6 @@ app.use(
           return await response.json();
         })
       );
-
       res.status(200).send(results);
     } catch (err) {
       next(err);
