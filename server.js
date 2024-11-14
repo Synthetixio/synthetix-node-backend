@@ -1,4 +1,5 @@
 const express = require('express');
+const multer = require('multer');
 const { ethers, JsonRpcProvider, Contract } = require('ethers');
 const { address, abi } = require('@vderunov/whitelist-contract/deployments/11155420/Whitelist');
 const crypto = require('node:crypto');
@@ -8,6 +9,7 @@ const app = express();
 require('dotenv').config();
 const { createProxyMiddleware } = require('http-proxy-middleware');
 
+const upload = multer();
 const PORT = process.env.PORT || 3005;
 
 const IPFS_HOST = process.env.IPFS_HOST || '127.0.0.1';
@@ -168,6 +170,59 @@ app.use(
   '/api/v0/add',
   authenticateToken,
   createProxyMiddleware({ target: `${IPFS_URL}/api/v0/add` })
+);
+
+app.use(
+  '/api/v0/files/mkdir',
+  authenticateToken,
+  createProxyMiddleware({
+    target: `${IPFS_URL}/api/v0/files/mkdir?arg=/project1/dist&parents=true`,
+    on: {
+      proxyReq: (req) => {
+        if (req.path.endsWith('/')) {
+          req.path = req.path.slice(0, -1);
+        }
+      },
+    },
+  })
+);
+
+app.use(
+  '/api/v0/files/upload',
+  authenticateToken,
+  upload.array('files'),
+  async (req, res, next) => {
+    if (!req.files || !req.files.length) {
+      throw new HttpError('No files uploaded.', 400);
+    }
+
+    try {
+      const results = await Promise.all(
+        req.files.map(async (file) => {
+          const formData = new FormData();
+          // TODO: Fix: now an empty object is being added to IPFS, need to fix it
+          formData.append('file', file);
+
+          const response = await fetch(
+            `${IPFS_URL}api/v0/add?to-files=/project1/dist/${file.originalname}`,
+            {
+              method: 'POST',
+              body: formData,
+            }
+          );
+
+          if (!response.ok) {
+            throw new Error(`Failed to upload file ${file.originalname} to IPFS`);
+          }
+          return await response.json();
+        })
+      );
+
+      res.status(200).send(results);
+    } catch (err) {
+      next(err);
+    }
+  }
 );
 
 const authenticateAdmin = async (req, _res, next) => {
