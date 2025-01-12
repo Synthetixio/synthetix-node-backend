@@ -8,7 +8,6 @@ const jwt = require('jsonwebtoken');
 const app = express();
 require('dotenv').config();
 const { createProxyMiddleware } = require('http-proxy-middleware');
-const https = require('node:https');
 
 const PORT = process.env.PORT || 3005;
 
@@ -163,7 +162,7 @@ const getEthereumContract = () => {
   }
 };
 
-const validateWalletAddress = (req, res, next) => {
+const validateWalletAddress = (req, _res, next) => {
   if (!req.body.walletAddress) {
     return next(new HttpError('Missing wallet address', 400));
   }
@@ -173,7 +172,7 @@ const validateWalletAddress = (req, res, next) => {
   next();
 };
 
-const transformWalletAddress = (req, res, next) => {
+const transformWalletAddress = (req, _res, next) => {
   req.body.walletAddress = req.body.walletAddress.toLowerCase();
   next();
 };
@@ -199,7 +198,7 @@ app.listen(PORT, () => {
   Promise.all([updateStats(), updatePeers()]);
 });
 
-const validateVerificationParameters = (req, res, next) => {
+const validateVerificationParameters = (req, _res, next) => {
   if (!req.body.nonce) {
     return next(new HttpError('Nonce not provided', 400));
   }
@@ -237,7 +236,7 @@ const createJwtToken = async (walletAddress) => {
   });
 };
 
-app.post('/verify', validateVerificationParameters, verifyMessage, async (req, res, next) => {
+app.post('/verify', validateVerificationParameters, verifyMessage, async (_req, res, next) => {
   try {
     res.status(200).send({ token: await createJwtToken(res.locals.address) });
   } catch (err) {
@@ -268,7 +267,7 @@ const verifyToken = (req) => {
   });
 };
 
-const authenticateToken = async (req, res, next) => {
+const authenticateToken = async (req, _res, next) => {
   try {
     const decoded = await verifyToken(req);
     const contract = await getEthereumContract();
@@ -281,7 +280,7 @@ const authenticateToken = async (req, res, next) => {
   }
 };
 
-app.get('/protected', authenticateToken, (req, res) => {
+app.get('/protected', authenticateToken, (_req, res) => {
   res.send('Hello! You are viewing protected content.');
 });
 
@@ -291,7 +290,7 @@ app.use(
   createProxyMiddleware({ target: `${IPFS_URL}/api/v0/add` })
 );
 
-const authenticateAdmin = async (req, res, next) => {
+const authenticateAdmin = async (req, _res, next) => {
   try {
     const decoded = await verifyToken(req);
     const contract = await getEthereumContract();
@@ -324,7 +323,7 @@ const fetchApprovedWallets = async () => {
   return response.json();
 };
 
-app.get('/approved-wallets', authenticateAdmin, async (req, res, next) => {
+app.get('/approved-wallets', authenticateAdmin, async (_req, res, next) => {
   try {
     res.status(200).send(await fetchApprovedWallets());
   } catch (err) {
@@ -352,7 +351,7 @@ const fetchSubmittedWallets = async () => {
   return response.json();
 };
 
-app.get('/submitted-wallets', authenticateAdmin, async (req, res, next) => {
+app.get('/submitted-wallets', authenticateAdmin, async (_req, res, next) => {
   try {
     res.status(200).send(await fetchSubmittedWallets());
   } catch (err) {
@@ -360,7 +359,7 @@ app.get('/submitted-wallets', authenticateAdmin, async (req, res, next) => {
   }
 });
 
-app.use((err, req, res, next) => {
+app.use((err, _req, res, _next) => {
   const status = err.code || 500;
   const message = err.message || 'Something went wrong';
   res.status(status).send(message);
