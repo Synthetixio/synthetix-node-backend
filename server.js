@@ -238,12 +238,13 @@ const createJwtToken = async (walletAddress) => {
   });
 };
 
-const saveTokenToGun = (walletAddress, data) => {
+const saveTokenToGun = (walletAddress, token) => {
   return new Promise((resolve, reject) => {
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
     gun
       .get('tokens')
       .get(walletAddress.toLowerCase())
-      .put(data, (ack) => {
+      .put(tokenHash, (ack) => {
         if (ack.err) {
           reject(new HttpError('Failed to save token to Gun'));
         } else {
@@ -288,11 +289,12 @@ const verifyToken = (req) => {
 
 const validateTokenWithGun = (walletAddress, token) => {
   return new Promise((resolve, reject) => {
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
     gun
       .get('tokens')
       .get(walletAddress.toLowerCase())
       .once((tokenData) => {
-        if (!tokenData || tokenData !== token) {
+        if (!tokenData || tokenData !== tokenHash) {
           reject(new HttpError('Unauthorized', 401));
         } else {
           resolve();
@@ -395,24 +397,10 @@ app.get('/submitted-wallets', authenticateAdmin, async (_req, res, next) => {
   }
 });
 
-const checkExistingTokenInGun = (walletAddress) => {
-  return new Promise((resolve, reject) => {
-    gun
-      .get('tokens')
-      .get(walletAddress.toLowerCase())
-      .once((tokenData) => {
-        if (!tokenData || !tokenData) {
-          reject(new HttpError('Token not found for this wallet address'));
-        } else {
-          resolve();
-        }
-      });
-  });
-};
-
 app.post('/refresh-token', validateWalletAddress, authenticateToken, async (req, res, next) => {
   try {
-    await checkExistingTokenInGun(req.body.walletAddress);
+    const token = req.headers.authorization.split(' ')[1];
+    await validateTokenWithGun(req.body.walletAddress, token);
     const newToken = await createJwtToken(req.body.walletAddress);
     await saveTokenToGun(req.body.walletAddress, newToken);
     res.status(200).send({ token: newToken });
