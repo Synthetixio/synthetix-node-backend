@@ -19,7 +19,7 @@
     "jsonwebtoken": "^9.0.2"
   },
   "devDependencies": {
-    "@biomejs/biome": "1.7.0",
+    "@biomejs/biome": "1.9.4",
     "nodemon": "^3.1.0"
   }
 }
