@@ -4,6 +4,7 @@ const { ethers, JsonRpcProvider, Contract } = require('ethers');
 const { address, abi } = require('@vderunov/whitelist-contract/deployments/11155420/Whitelist');
 const crypto = require('node:crypto');
 const cors = require('cors');
+const Gun = require('gun');
 const jwt = require('jsonwebtoken');
 const app = express();
 require('dotenv').config();
@@ -193,10 +194,11 @@ const createNonce = async (req, res, next) => {
 
 app.post('/signup', validateWalletAddress, transformWalletAddress, createNonce);
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
   Promise.all([updateStats(), updatePeers()]);
 });
+const gun = Gun({ web: server });
 
 const validateVerificationParameters = (req, _res, next) => {
   if (!req.body.nonce) {
@@ -229,16 +231,33 @@ const verifyMessage = async (req, res, next) => {
 
 const createJwtToken = async (walletAddress) => {
   return new Promise((resolve, reject) => {
-    jwt.sign({ walletAddress }, process.env.JWT_SECRET_KEY, { expiresIn: '1d' }, (err, token) => {
+    jwt.sign({ walletAddress }, process.env.JWT_SECRET_KEY, {}, (err, token) => {
       if (err) reject(err);
       resolve(token);
     });
   });
 };
 
+const saveTokenToGun = (walletAddress, data) => {
+  return new Promise((resolve, reject) => {
+    gun
+      .get('tokens')
+      .get(walletAddress.toLowerCase())
+      .put(data, (ack) => {
+        if (ack.err) {
+          reject(new HttpError('Failed to save token to Gun'));
+        } else {
+          resolve();
+        }
+      });
+  });
+};
+
 app.post('/verify', validateVerificationParameters, verifyMessage, async (_req, res, next) => {
   try {
-    res.status(200).send({ token: await createJwtToken(res.locals.address) });
+    const token = await createJwtToken(res.locals.address);
+    await saveTokenToGun(res.locals.address, token);
+    res.status(200).send({ token });
   } catch (err) {
     next(err);
   }
@@ -267,6 +286,21 @@ const verifyToken = (req) => {
   });
 };
 
+const validateTokenWithGun = (walletAddress, token) => {
+  return new Promise((resolve, reject) => {
+    gun
+      .get('tokens')
+      .get(walletAddress.toLowerCase())
+      .once((tokenData) => {
+        if (!tokenData || tokenData !== token) {
+          reject(new HttpError('Unauthorized', 401));
+        } else {
+          resolve();
+        }
+      });
+  });
+};
+
 const authenticateToken = async (req, _res, next) => {
   try {
     const decoded = await verifyToken(req);
@@ -274,6 +308,8 @@ const authenticateToken = async (req, _res, next) => {
     if (!(await contract.isGranted(decoded.walletAddress))) {
       throw new HttpError('Unauthorized', 401);
     }
+    const token = req.headers.authorization.split(' ')[1];
+    await validateTokenWithGun(decoded.walletAddress, token);
     next();
   } catch (err) {
     next(err);
@@ -354,6 +390,32 @@ const fetchSubmittedWallets = async () => {
 app.get('/submitted-wallets', authenticateAdmin, async (_req, res, next) => {
   try {
     res.status(200).send(await fetchSubmittedWallets());
+  } catch (err) {
+    next(err);
+  }
+});
+
+const checkExistingTokenInGun = (walletAddress) => {
+  return new Promise((resolve, reject) => {
+    gun
+      .get('tokens')
+      .get(walletAddress.toLowerCase())
+      .once((tokenData) => {
+        if (!tokenData || !tokenData) {
+          reject(new HttpError('Token not found for this wallet address'));
+        } else {
+          resolve();
+        }
+      });
+  });
+};
+
+app.post('/refresh-token', validateWalletAddress, authenticateToken, async (req, res, next) => {
+  try {
+    await checkExistingTokenInGun(req.body.walletAddress);
+    const newToken = await createJwtToken(req.body.walletAddress);
+    await saveTokenToGun(req.body.walletAddress, newToken);
+    res.status(200).send({ token: newToken });
   } catch (err) {
     next(err);
   }
