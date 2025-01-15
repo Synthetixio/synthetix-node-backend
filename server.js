@@ -335,6 +335,8 @@ const authenticateAdmin = async (req, _res, next) => {
     if (!(await contract.isAdmin(decoded.walletAddress))) {
       throw new HttpError('Unauthorized', 401);
     }
+    const token = req.headers.authorization.split(' ')[1];
+    await validateTokenWithGun(decoded.walletAddress, token);
     next();
   } catch (err) {
     next(err);
