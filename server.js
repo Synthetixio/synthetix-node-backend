@@ -4,6 +4,8 @@ const { ethers, JsonRpcProvider, Contract } = require('ethers');
 const { address, abi } = require('@vderunov/whitelist-contract/deployments/11155420/Whitelist');
 const crypto = require('node:crypto');
 const cors = require('cors');
+const { Namespace: NamespaceAddress } = require('./namespace/11155420/deployments.json');
+const NamespaceAbi = require('./namespace/11155420/Namespace.json');
 const Gun = require('gun');
 const jwt = require('jsonwebtoken');
 const app = express();
@@ -154,12 +156,21 @@ class EthereumContractError extends Error {
   }
 }
 
-const getEthereumContract = () => {
+const getNamespaceContract = () => {
+  try {
+    const provider = new JsonRpcProvider('https://sepolia.optimism.io');
+    return new Contract(NamespaceAddress, NamespaceAbi, provider);
+  } catch (err) {
+    throw new EthereumContractError('Failed to get Namespace contract', err);
+  }
+};
+
+const getWhitelistContract = () => {
   try {
     const provider = new JsonRpcProvider('https://sepolia.optimism.io');
     return new Contract(address, abi, provider);
   } catch (err) {
-    throw new EthereumContractError('Failed to get Ethereum contract', err);
+    throw new EthereumContractError('Failed to get Whitelist contract', err);
   }
 };
 
@@ -306,12 +317,47 @@ const validateTokenWithGun = (walletAddress, token) => {
 const authenticateToken = async (req, _res, next) => {
   try {
     const decoded = await verifyToken(req);
-    const contract = await getEthereumContract();
+    const contract = await getWhitelistContract();
     if (!(await contract.isGranted(decoded.walletAddress))) {
       throw new HttpError('Unauthorized', 401);
     }
     const token = req.headers.authorization.split(' ')[1];
     await validateTokenWithGun(decoded.walletAddress, token);
+    next();
+  } catch (err) {
+    next(err);
+  }
+};
+
+const validateNamespaceOwnership = async (namespace, walletAddress) => {
+  if (!namespace) {
+    throw new HttpError('Missing namespace parameter', 400);
+  }
+  const contract = await getNamespaceContract();
+  const tokenId = await contract.namespaceToTokenId(namespace);
+
+  if (tokenId === BigInt(0)) {
+    throw new HttpError('Namespace not found', 404);
+  }
+  if ((await contract.ownerOf(tokenId)).toLowerCase() !== walletAddress.toLowerCase()) {
+    throw new HttpError('Not namespace owner', 403);
+  }
+};
+
+const verifyKeyGenNamespace = async (req, _res, next) => {
+  try {
+    const decoded = await verifyToken(req);
+    await validateNamespaceOwnership(req.query.arg, decoded.walletAddress);
+    next();
+  } catch (err) {
+    next(err);
+  }
+};
+
+const verifyNamePublishNamespace = async (req, _res, next) => {
+  try {
+    const decoded = await verifyToken(req);
+    await validateNamespaceOwnership(req.query.key, decoded.walletAddress);
     next();
   } catch (err) {
     next(err);
@@ -328,10 +374,34 @@ app.use(
   createProxyMiddleware({ target: `${IPFS_URL}/api/v0/add` })
 );
 
+app.use(
+  '/api/v0/key/gen',
+  authenticateToken,
+  verifyKeyGenNamespace,
+  createProxyMiddleware({
+    target: `${IPFS_URL}/api/v0/key/gen`,
+    pathRewrite: {
+      '^/': '',
+    },
+  })
+);
+
+app.use(
+  '/api/v0/name/publish',
+  authenticateToken,
+  verifyNamePublishNamespace,
+  createProxyMiddleware({
+    target: `${IPFS_URL}/api/v0/name/publish`,
+    pathRewrite: {
+      '^/': '',
+    },
+  })
+);
+
 const authenticateAdmin = async (req, _res, next) => {
   try {
     const decoded = await verifyToken(req);
-    const contract = await getEthereumContract();
+    const contract = await getWhitelistContract();
     if (!(await contract.isAdmin(decoded.walletAddress))) {
       throw new HttpError('Unauthorized', 401);
     }
