@@ -321,6 +321,7 @@ const authenticateToken = async (req, _res, next) => {
     }
     const token = req.headers.authorization.split(' ')[1];
     await validateTokenWithGun(decoded.walletAddress, token);
+    req.user = decoded;
     next();
   } catch (err) {
     next(err);
@@ -344,8 +345,7 @@ const validateNamespaceOwnership = async (namespace, walletAddress) => {
 
 const verifyKeyGenNamespace = async (req, _res, next) => {
   try {
-    const decoded = await verifyToken(req);
-    await validateNamespaceOwnership(req.query.arg, decoded.walletAddress);
+    await validateNamespaceOwnership(req.query.arg, req.user.walletAddress);
     next();
   } catch (err) {
     next(err);
@@ -354,8 +354,7 @@ const verifyKeyGenNamespace = async (req, _res, next) => {
 
 const verifyNamePublishNamespace = async (req, _res, next) => {
   try {
-    const decoded = await verifyToken(req);
-    await validateNamespaceOwnership(req.query.key, decoded.walletAddress);
+    await validateNamespaceOwnership(req.query.key, req.user.walletAddress);
     next();
   } catch (err) {
     next(err);
@@ -384,10 +383,11 @@ app.use(
   })
 );
 
-const saveDeploymentsToGun = (key, value) => {
+const saveDeploymentsToGun = (walletAddress, key, value) => {
   return new Promise((resolve, reject) => {
     gun
       .get('deployments')
+      .get(walletAddress.toLowerCase())
       .get(key)
       .put(value, (ack) => {
         if (ack.err) {
@@ -414,7 +414,11 @@ app.use(
         res.removeHeader('trailer');
         const response = responseBuffer.toString('utf8');
         try {
-          await saveDeploymentsToGun(req.query.key, JSON.parse(response).Name);
+          await saveDeploymentsToGun(
+            req.user.walletAddress,
+            req.query.key,
+            JSON.parse(response).Name
+          );
         } catch (err) {
           console.error('Error saving to Gun:', err.message);
         }
@@ -507,27 +511,30 @@ app.post('/refresh-token', validateWalletAddress, authenticateToken, async (req,
   }
 });
 
-const getDeploymentsFromGun = () => {
-  return new Promise((resolve, reject) => {
-    gun.get('deployments').once((data) => {
-      if (data) {
-        const { _, ...deploymentData } = data;
-        resolve(
-          Object.entries(deploymentData).map(([name, value]) => ({
-            name,
-            value,
-          }))
-        );
-      } else {
-        reject(new HttpError('No deployments found in Gun'));
-      }
-    });
+const getDeploymentsFromGun = (walletAddress) => {
+  return new Promise((resolve) => {
+    gun
+      .get('deployments')
+      .get(walletAddress.toLowerCase())
+      .once((data) => {
+        if (data) {
+          const { _, ...deploymentData } = data;
+          resolve(
+            Object.entries(deploymentData).map(([name, value]) => ({
+              name,
+              value,
+            }))
+          );
+        } else {
+          resolve([]);
+        }
+      });
   });
 };
 
-app.get('/deployments', authenticateToken, async (_req, res, next) => {
+app.get('/deployments', authenticateToken, async (req, res, next) => {
   try {
-    res.status(200).json(await getDeploymentsFromGun());
+    res.status(200).json(await getDeploymentsFromGun(req.user.walletAddress));
   } catch (err) {
     next(err);
   }
