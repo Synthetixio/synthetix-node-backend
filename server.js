@@ -10,7 +10,7 @@ const Gun = require('gun');
 const jwt = require('jsonwebtoken');
 const app = express();
 require('dotenv').config();
-const { createProxyMiddleware } = require('http-proxy-middleware');
+const { createProxyMiddleware, responseInterceptor } = require('http-proxy-middleware');
 
 const PORT = process.env.PORT || 3005;
 
@@ -108,7 +108,6 @@ async function updateStats() {
   const dailyOut = state.totalOut / uptimeDays;
   const hourlyOut = state.totalOut / uptimeHours;
   Object.assign(state, { dailyIn, hourlyIn, dailyOut, hourlyOut });
-  console.log(state);
 }
 
 async function updatePeers() {
@@ -135,7 +134,6 @@ async function updatePeers() {
     })
   );
   Object.assign(state, { peers });
-  console.log('[Peers Updated]', state);
 }
 
 setInterval(updatePeers, 60_000);
@@ -386,6 +384,21 @@ app.use(
   })
 );
 
+const saveDeploymentsToGun = (key, value) => {
+  return new Promise((resolve, reject) => {
+    gun
+      .get('deployments')
+      .get(key)
+      .put(value, (ack) => {
+        if (ack.err) {
+          reject(new Error(`Failed to save deployment to Gun: ${ack.err}`));
+        } else {
+          resolve();
+        }
+      });
+  });
+};
+
 app.use(
   '/api/v0/name/publish',
   authenticateToken,
@@ -394,6 +407,19 @@ app.use(
     target: `${IPFS_URL}/api/v0/name/publish`,
     pathRewrite: {
       '^/': '',
+    },
+    selfHandleResponse: true,
+    on: {
+      proxyRes: responseInterceptor(async (responseBuffer, _proxyRes, req, res) => {
+        res.removeHeader('trailer');
+        const response = responseBuffer.toString('utf8');
+        try {
+          await saveDeploymentsToGun(req.query.key, JSON.parse(response).Name);
+        } catch (err) {
+          console.error('Error saving to Gun:', err.message);
+        }
+        return responseBuffer;
+      }),
     },
   })
 );
