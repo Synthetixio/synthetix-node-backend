@@ -507,6 +507,32 @@ app.post('/refresh-token', validateWalletAddress, authenticateToken, async (req,
   }
 });
 
+const getDeploymentsFromGun = () => {
+  return new Promise((resolve, reject) => {
+    gun.get('deployments').once((data) => {
+      if (data) {
+        const { _, ...deploymentData } = data;
+        resolve(
+          Object.entries(deploymentData).map(([name, value]) => ({
+            name,
+            value,
+          }))
+        );
+      } else {
+        reject(new HttpError('No deployments found in Gun'));
+      }
+    });
+  });
+};
+
+app.get('/deployments', authenticateToken, async (_req, res, next) => {
+  try {
+    res.status(200).json(await getDeploymentsFromGun());
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.use((err, _req, res, _next) => {
   const status = err.code || 500;
   const message = err.message || 'Something went wrong';
