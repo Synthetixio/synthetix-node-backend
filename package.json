@@ -6,7 +6,7 @@
   "packageManager": "yarn@4.1.1",
   "scripts": {
     "start": "nodemon server",
-    "lint": "biome check --apply ."
+    "lint": "biome check --write ."
   },
   "dependencies": {
     "@vderunov/whitelist-contract": "^2.0.0",
