@@ -521,7 +521,7 @@ app.post('/refresh-token', validateWalletAddress, authenticateToken, async (req,
   }
 });
 
-const getDeploymentsFromGun = (walletAddress) => {
+const getDeploymentsByWalletAddressFromGun = (walletAddress) => {
   return new Promise((resolve) => {
     gun
       .get('deployments')
@@ -544,7 +544,85 @@ const getDeploymentsFromGun = (walletAddress) => {
 
 app.get('/deployments', authenticateToken, async (req, res, next) => {
   try {
-    res.status(200).json(await getDeploymentsFromGun(req.user.walletAddress));
+    res.status(200).json(await getDeploymentsByWalletAddressFromGun(req.user.walletAddress));
+  } catch (err) {
+    next(err);
+  }
+});
+
+const getNamespaces = async (walletAddress) => {
+  const NamespaceContract = getNamespaceContract();
+  const Multicall3Contract = getMulticall3Contract();
+
+  const NamespaceInterface = new ethers.Interface(NamespaceAbi);
+
+  const ownerBalance = await NamespaceContract.balanceOf(walletAddress);
+  if (ownerBalance === BigInt(0)) {
+    return [];
+  }
+
+  const ownerTokensArray = Array.from({ length: Number(ownerBalance) }, (_, index) => index);
+  const BATCH_SIZE = 500;
+  const tokenChunks = [];
+  for (let i = 0; i < ownerTokensArray.length; i += BATCH_SIZE) {
+    tokenChunks.push(ownerTokensArray.slice(i, i + BATCH_SIZE));
+  }
+
+  let tokenIds = [];
+  for (const chunk of tokenChunks) {
+    const calls = chunk.map((index) => ({
+      target: NamespaceAddress,
+      allowFailure: true,
+      callData: NamespaceInterface.encodeFunctionData('tokenOfOwnerByIndex', [
+        walletAddress,
+        index,
+      ]),
+    }));
+
+    const multicallResults = await Multicall3Contract.aggregate3.staticCall(calls);
+
+    const results = multicallResults.map(({ success, returnData }, i) => {
+      if (!success) {
+        console.error(`Failed to retrieve token ID for index: ${chunk[i]}`);
+        return null;
+      }
+      return NamespaceInterface.decodeFunctionResult('tokenOfOwnerByIndex', returnData)[0];
+    });
+
+    tokenIds = tokenIds.concat(results);
+  }
+
+  const tokenChunksForNamespaces = [];
+  for (let i = 0; i < tokenIds.length; i += BATCH_SIZE) {
+    tokenChunksForNamespaces.push(tokenIds.slice(i, i + BATCH_SIZE));
+  }
+
+  let namespaces = [];
+  for (const chunk of tokenChunksForNamespaces) {
+    const calls = chunk.map((tokenId) => ({
+      target: NamespaceAddress,
+      allowFailure: true,
+      callData: NamespaceInterface.encodeFunctionData('tokenIdToNamespace', [tokenId]),
+    }));
+
+    const multicallResults = await Multicall3Contract.aggregate3.staticCall(calls);
+
+    const results = multicallResults.map(({ success, returnData }, i) => {
+      if (!success) {
+        console.error(`Failed to fetch namespace for token ID ${chunk[i]}`);
+        return null;
+      }
+      return NamespaceInterface.decodeFunctionResult('tokenIdToNamespace', returnData)[0];
+    });
+
+    namespaces = namespaces.concat(results);
+  }
+  return namespaces;
+};
+
+app.get('/namespaces', authenticateToken, async (req, res, next) => {
+  try {
+    res.status(200).json({ namespaces: await getNamespaces(req.user.walletAddress) });
   } catch (err) {
     next(err);
   }
@@ -552,74 +630,10 @@ app.get('/deployments', authenticateToken, async (req, res, next) => {
 
 app.get('/unpublished-namespaces', authenticateToken, async (req, res, next) => {
   try {
-    const NamespaceContract = getNamespaceContract();
-    const Multicall3Contract = getMulticall3Contract();
-
-    const NamespaceInterface = new ethers.Interface(NamespaceAbi);
-
-    const ownerBalance = await NamespaceContract.balanceOf(req.user.walletAddress);
-    if (ownerBalance === BigInt(0)) {
-      return res.status(200).json({ namespaces: [] });
-    }
-
-    const ownerTokensArray = Array.from({ length: Number(ownerBalance) }, (_, index) => index);
-    const BATCH_SIZE = 500;
-    const tokenChunks = [];
-    for (let i = 0; i < ownerTokensArray.length; i += BATCH_SIZE) {
-      tokenChunks.push(ownerTokensArray.slice(i, i + BATCH_SIZE));
-    }
-
-    let tokenIds = [];
-    for (const chunk of tokenChunks) {
-      const calls = chunk.map((index) => ({
-        target: NamespaceAddress,
-        allowFailure: true,
-        callData: NamespaceInterface.encodeFunctionData('tokenOfOwnerByIndex', [
-          req.user.walletAddress,
-          index,
-        ]),
-      }));
-
-      const multicallResults = await Multicall3Contract.aggregate3.staticCall(calls);
-
-      const results = multicallResults.map(({ success, returnData }, i) => {
-        if (!success) {
-          console.error(`Failed to retrieve token ID for index: ${chunk[i]}`);
-          return null;
-        }
-        return NamespaceInterface.decodeFunctionResult('tokenOfOwnerByIndex', returnData)[0];
-      });
-
-      tokenIds = tokenIds.concat(results);
-    }
-
-    const tokenChunksForNamespaces = [];
-    for (let i = 0; i < tokenIds.length; i += BATCH_SIZE) {
-      tokenChunksForNamespaces.push(tokenIds.slice(i, i + BATCH_SIZE));
-    }
-
-    let namespaces = [];
-    for (const chunk of tokenChunksForNamespaces) {
-      const calls = chunk.map((tokenId) => ({
-        target: NamespaceAddress,
-        allowFailure: true,
-        callData: NamespaceInterface.encodeFunctionData('tokenIdToNamespace', [tokenId]),
-      }));
-
-      const multicallResults = await Multicall3Contract.aggregate3.staticCall(calls);
-
-      const results = multicallResults.map(({ success, returnData }, i) => {
-        if (!success) {
-          console.error(`Failed to fetch namespace for token ID ${chunk[i]}`);
-          return null;
-        }
-        return NamespaceInterface.decodeFunctionResult('tokenIdToNamespace', returnData)[0];
-      });
-
-      namespaces = namespaces.concat(results);
-    }
-
-    res.status(200).json({ namespaces });
+    const namespaces = await getNamespaces(req.user.walletAddress);
+    const deployments = await getDeploymentsByWalletAddressFromGun(req.user.walletAddress);
+    const deployedNamesSet = new Set(deployments.map(({ name }) => name));
+    res.status(200).json({ namespaces: namespaces.filter((n) => !deployedNamesSet.has(n)) });
   } catch (err) {
     next(err);
   }
