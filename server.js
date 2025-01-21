@@ -421,12 +421,16 @@ app.use(
     selfHandleResponse: true,
     on: {
       proxyRes: responseInterceptor(async (responseBuffer, _proxyRes, req, res) => {
-        res.removeHeader('trailer');
-        const response = JSON.parse(responseBuffer.toString('utf8'));
-        if (!response.Message) {
-          await Promise.all(
-            response.Keys.map((k) => removeDeploymentFromGun(req.user.walletAddress, k.Name))
-          );
+        try {
+          res.removeHeader('trailer');
+          const response = JSON.parse(responseBuffer.toString('utf8'));
+          if (!response.Message) {
+            await Promise.all(
+              response.Keys.map((k) => removeDeploymentFromGun(req.user.walletAddress, k.Name))
+            );
+          }
+        } catch (err) {
+          console.error('Error processing proxy response:', err);
         }
         return responseBuffer;
       }),
