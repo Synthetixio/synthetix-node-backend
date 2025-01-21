@@ -422,14 +422,11 @@ app.use(
     on: {
       proxyRes: responseInterceptor(async (responseBuffer, _proxyRes, req, res) => {
         res.removeHeader('trailer');
-        const response = responseBuffer.toString('utf8');
-        try {
-          if (JSON.parse(response).Message) {
-            throw new Error(response);
-          }
-          await removeDeploymentFromGun(req.user.walletAddress, JSON.parse(response).Keys[0]?.Name);
-        } catch (err) {
-          console.error('Error removing from Gun:', err);
+        const response = JSON.parse(responseBuffer.toString('utf8'));
+        if (!response.Message) {
+          await Promise.all(
+            response.Keys.map((k) => removeDeploymentFromGun(req.user.walletAddress, k.Name))
+          );
         }
         return responseBuffer;
       }),
