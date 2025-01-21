@@ -423,10 +423,11 @@ app.use(
       proxyRes: responseInterceptor(async (responseBuffer, _proxyRes, req, res) => {
         try {
           res.removeHeader('trailer');
-          const response = JSON.parse(responseBuffer.toString('utf8'));
-          if (!response.Message) {
+          if (_proxyRes.statusCode < 400) {
             await Promise.all(
-              response.Keys.map((k) => removeDeploymentFromGun(req.user.walletAddress, k.Name))
+              JSON.parse(responseBuffer.toString('utf8')).Keys.map((k) =>
+                removeDeploymentFromGun(req.user.walletAddress, k.Name)
+              )
             );
           }
         } catch (err) {
@@ -466,14 +467,15 @@ app.use(
     selfHandleResponse: true,
     on: {
       proxyRes: responseInterceptor(async (responseBuffer, _proxyRes, req, res) => {
-        res.removeHeader('trailer');
-        const response = responseBuffer.toString('utf8');
         try {
-          await saveDeploymentsToGun(
-            req.user.walletAddress,
-            req.query.key,
-            JSON.parse(response).Name
-          );
+          res.removeHeader('trailer');
+          if (_proxyRes.statusCode < 400) {
+            await saveDeploymentsToGun(
+              req.user.walletAddress,
+              req.query.key,
+              JSON.parse(responseBuffer.toString('utf8')).Name
+            );
+          }
         } catch (err) {
           console.error('Error saving to Gun:', err.message);
         }
