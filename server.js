@@ -594,7 +594,7 @@ app.get('/deployments', authenticateToken, async (req, res, next) => {
   }
 });
 
-const getNamespaces = async (walletAddress) => {
+const getNamespacesFromContract = async (walletAddress) => {
   const NamespaceContract = getNamespaceContract();
   const Multicall3Contract = getMulticall3Contract();
 
@@ -666,7 +666,7 @@ const getNamespaces = async (walletAddress) => {
 
 app.get('/namespaces', authenticateToken, async (req, res, next) => {
   try {
-    res.status(200).json({ namespaces: await getNamespaces(req.user.walletAddress) });
+    res.status(200).json({ namespaces: await getNamespacesFromContract(req.user.walletAddress) });
   } catch (err) {
     next(err);
   }
@@ -674,9 +674,16 @@ app.get('/namespaces', authenticateToken, async (req, res, next) => {
 
 app.get('/unpublished-namespaces', authenticateToken, async (req, res, next) => {
   try {
-    const namespaces = await getNamespaces(req.user.walletAddress);
-    const deployments = await getDeploymentsByWalletAddressFromGun(req.user.walletAddress);
-    const deployedNamesSet = new Set(deployments.map(({ name }) => name));
+    const [namespaces, deployments] = await Promise.all([
+      getNamespacesFromContract(req.user.walletAddress),
+      getDeploymentsByWalletAddressFromGun(req.user.walletAddress),
+    ]);
+
+    const deployedNamesSet = deployments.reduce((set, { name, value }) => {
+      if (value !== null) set.add(name);
+      return set;
+    }, new Set());
+
     res.status(200).json({ namespaces: namespaces.filter((n) => !deployedNamesSet.has(n)) });
   } catch (err) {
     next(err);
