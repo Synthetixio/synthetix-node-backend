@@ -393,6 +393,50 @@ app.use(
   })
 );
 
+const removeDeploymentFromGun = (walletAddress, name) => {
+  return new Promise((resolve, reject) => {
+    gun
+      .get('deployments')
+      .get(walletAddress.toLowerCase())
+      .get(name)
+      .put(null, (ack) => {
+        if (ack.err) {
+          reject(new HttpError(`Failed to remove deployment from Gun: ${ack.err}`));
+        } else {
+          resolve();
+        }
+      });
+  });
+};
+
+app.use(
+  '/api/v0/key/rm',
+  authenticateToken,
+  verifyKeyGenNamespace,
+  createProxyMiddleware({
+    target: `${IPFS_URL}/api/v0/key/rm`,
+    pathRewrite: {
+      '^/': '',
+    },
+    selfHandleResponse: true,
+    on: {
+      proxyRes: responseInterceptor(async (responseBuffer, _proxyRes, req, res) => {
+        res.removeHeader('trailer');
+        const response = responseBuffer.toString('utf8');
+        try {
+          if (JSON.parse(response).Message) {
+            throw new Error(response);
+          }
+          await removeDeploymentFromGun(req.user.walletAddress, JSON.parse(response).Keys[0]?.Name);
+        } catch (err) {
+          console.error('Error removing from Gun:', err);
+        }
+        return responseBuffer;
+      }),
+    },
+  })
+);
+
 const saveDeploymentsToGun = (walletAddress, key, value) => {
   return new Promise((resolve, reject) => {
     gun
@@ -401,7 +445,7 @@ const saveDeploymentsToGun = (walletAddress, key, value) => {
       .get(key)
       .put(value, (ack) => {
         if (ack.err) {
-          reject(new Error(`Failed to save deployment to Gun: ${ack.err}`));
+          reject(new HttpError(`Failed to save deployment to Gun: ${ack.err}`));
         } else {
           resolve();
         }
