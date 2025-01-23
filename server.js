@@ -155,6 +155,9 @@ class EthereumContractError extends Error {
   }
 }
 
+const generateHash = (data) =>
+  crypto.createHash('sha256').update(`${data}:${process.env.SECRET}`).digest('hex');
+
 const getMulticall3Contract = () => {
   try {
     const provider = new JsonRpcProvider('https://sepolia.optimism.io');
@@ -259,11 +262,10 @@ const createJwtToken = async (walletAddress) => {
 
 const saveTokenToGun = (walletAddress, token) => {
   return new Promise((resolve, reject) => {
-    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
     gun
       .get('tokens')
-      .get(walletAddress.toLowerCase())
-      .put(tokenHash, (ack) => {
+      .get(generateHash(walletAddress.toLowerCase()))
+      .put(generateHash(token), (ack) => {
         if (ack.err) {
           reject(new HttpError('Failed to save token to Gun'));
         } else {
@@ -308,12 +310,11 @@ const verifyToken = (req) => {
 
 const validateTokenWithGun = (walletAddress, token) => {
   return new Promise((resolve, reject) => {
-    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
     gun
       .get('tokens')
-      .get(walletAddress.toLowerCase())
+      .get(generateHash(walletAddress.toLowerCase()))
       .once((tokenData) => {
-        if (!tokenData || tokenData !== tokenHash) {
+        if (!tokenData || tokenData !== generateHash(token)) {
           reject(new HttpError('Unauthorized', 401));
         } else {
           resolve();
@@ -397,7 +398,7 @@ const removeDeploymentFromGun = (walletAddress, name) => {
   return new Promise((resolve, reject) => {
     gun
       .get('deployments')
-      .get(walletAddress.toLowerCase())
+      .get(generateHash(walletAddress.toLowerCase()))
       .get(name)
       .put(null, (ack) => {
         if (ack.err) {
@@ -443,7 +444,7 @@ const saveDeploymentsToGun = (walletAddress, key, value) => {
   return new Promise((resolve, reject) => {
     gun
       .get('deployments')
-      .get(walletAddress.toLowerCase())
+      .get(generateHash(walletAddress.toLowerCase()))
       .get(key)
       .put(value, (ack) => {
         if (ack.err) {
@@ -572,7 +573,7 @@ const getDeploymentsByWalletAddressFromGun = (walletAddress) => {
   return new Promise((resolve) => {
     gun
       .get('deployments')
-      .get(walletAddress.toLowerCase())
+      .get(generateHash(walletAddress.toLowerCase()))
       .once((data) => {
         if (data) {
           const { _, ...deploymentData } = data;
