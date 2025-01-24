@@ -158,6 +158,9 @@ class EthereumContractError extends Error {
 const generateHash = (data) =>
   crypto.createHash('sha256').update(`${data}:${process.env.SECRET}`).digest('hex');
 
+const encrypt = async (data) => await Gun.SEA.encrypt(data, process.env.SECRET);
+const decrypt = async (data) => await Gun.SEA.decrypt(data, process.env.SECRET);
+
 const getMulticall3Contract = () => {
   try {
     const provider = new JsonRpcProvider('https://sepolia.optimism.io');
@@ -260,12 +263,12 @@ const createJwtToken = async (walletAddress) => {
   });
 };
 
-const saveTokenToGun = (walletAddress, token) => {
+const saveTokenToGun = (walletAddress, encryptedToken) => {
   return new Promise((resolve, reject) => {
     gun
       .get('tokens')
       .get(generateHash(walletAddress.toLowerCase()))
-      .put(generateHash(token), (ack) => {
+      .put(encryptedToken, (ack) => {
         if (ack.err) {
           reject(new HttpError('Failed to save token to Gun'));
         } else {
@@ -278,7 +281,8 @@ const saveTokenToGun = (walletAddress, token) => {
 app.post('/verify', validateVerificationParameters, verifyMessage, async (_req, res, next) => {
   try {
     const token = await createJwtToken(res.locals.address);
-    await saveTokenToGun(res.locals.address, token);
+    const encryptedToken = await encrypt(generateHash(token));
+    await saveTokenToGun(res.locals.address, encryptedToken);
     res.status(200).send({ token });
   } catch (err) {
     next(err);
@@ -313,8 +317,8 @@ const validateTokenWithGun = (walletAddress, token) => {
     gun
       .get('tokens')
       .get(generateHash(walletAddress.toLowerCase()))
-      .once((tokenData) => {
-        if (!tokenData || tokenData !== generateHash(token)) {
+      .once(async (tokenData) => {
+        if (!tokenData || (await decrypt(tokenData)) !== generateHash(token)) {
           reject(new HttpError('Unauthorized', 401));
         } else {
           resolve();
@@ -562,7 +566,8 @@ app.post('/refresh-token', validateWalletAddress, authenticateToken, async (req,
     const token = req.headers.authorization.split(' ')[1];
     await validateTokenWithGun(req.body.walletAddress, token);
     const newToken = await createJwtToken(req.body.walletAddress);
-    await saveTokenToGun(req.body.walletAddress, newToken);
+    const encryptedNewToken = await encrypt(generateHash(newToken));
+    await saveTokenToGun(req.body.walletAddress, encryptedNewToken);
     res.status(200).send({ token: newToken });
   } catch (err) {
     next(err);
