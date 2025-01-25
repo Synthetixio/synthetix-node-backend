@@ -161,32 +161,17 @@ const generateHash = (data) =>
 const encrypt = async (data) => await Gun.SEA.encrypt(data, process.env.SECRET);
 const decrypt = async (data) => await Gun.SEA.decrypt(data, process.env.SECRET);
 
-const getMulticall3Contract = () => {
-  try {
-    const provider = new JsonRpcProvider('https://sepolia.optimism.io');
-    return new Contract(Multicall3.address, Multicall3.abi, provider);
-  } catch (err) {
-    throw new EthereumContractError('Failed to get Multicall3 contract', err);
-  }
-};
-
-const getNamespaceContract = () => {
-  try {
-    const provider = new JsonRpcProvider('https://sepolia.optimism.io');
-    return new Contract(NamespaceAddress, NamespaceAbi, provider);
-  } catch (err) {
-    throw new EthereumContractError('Failed to get Namespace contract', err);
-  }
-};
-
-const getWhitelistContract = () => {
+const getContract = (address, abi) => {
   try {
     const provider = new JsonRpcProvider('https://sepolia.optimism.io');
     return new Contract(address, abi, provider);
   } catch (err) {
-    throw new EthereumContractError('Failed to get Whitelist contract', err);
+    throw new EthereumContractError('Failed to get contract', err);
   }
 };
+const getMulticall3Contract = () => getContract(Multicall3.address, Multicall3.abi);
+const getNamespaceContract = () => getContract(NamespaceAddress, NamespaceAbi);
+const getWhitelistContract = () => getContract(address, abi);
 
 const validateWalletAddress = (req, _res, next) => {
   if (!req.body.walletAddress) {
@@ -771,8 +756,9 @@ app.get('/ipns-keys', authenticateToken, async (req, res, next) => {
 });
 
 app.get('/generated-ipns-keys', authenticateToken, async (req, res, next) => {
+  const ipnsKeys = await getIpnsKeysFromGun(req.user.walletAddress);
   try {
-    res.status(200).json({ keys: await getIpnsKeysFromGun(req.user.walletAddress) });
+    res.status(200).json({ keys: ipnsKeys.filter((item) => item.value !== null) });
   } catch (err) {
     next(err);
   }
