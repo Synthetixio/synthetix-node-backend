@@ -764,6 +764,36 @@ app.get('/generated-ipns-keys', authenticateToken, async (req, res, next) => {
   }
 });
 
+app.use(
+  '/api/v0/dag/import',
+  authenticateToken,
+  createProxyMiddleware({
+    target: `${IPFS_URL}/api/v0/dag/import`,
+  })
+);
+
+app.use(
+  '/api/v0/dag/get',
+  authenticateToken,
+  createProxyMiddleware({
+    target: `${IPFS_URL}/api/v0/dag/get`,
+    pathRewrite: {
+      '^/': '',
+    },
+  })
+);
+
+app.use(
+  '/api/v0/pin/add',
+  authenticateToken,
+  createProxyMiddleware({
+    target: `${IPFS_URL}/api/v0/pin/add`,
+    pathRewrite: {
+      '^/': '',
+    },
+  })
+);
+
 app.use((err, _req, res, _next) => {
   const status = err.code || 500;
   const message = err.message || 'Something went wrong';
