@@ -769,6 +769,9 @@ app.use(
   authenticateToken,
   createProxyMiddleware({
     target: `${IPFS_URL}/api/v0/dag/import`,
+    pathRewrite: {
+      '^/': '',
+    },
   })
 );
 
