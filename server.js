@@ -365,12 +365,6 @@ app.get('/protected', authenticateToken, (_req, res) => {
   res.send('Hello! You are viewing protected content.');
 });
 
-app.use(
-  '/api/v0/add',
-  authenticateToken,
-  createProxyMiddleware({ target: `${IPFS_URL}/api/v0/add` })
-);
-
 const saveIpnsKeysToGun = (walletAddress, key, value) => {
   return new Promise((resolve, reject) => {
     gun
@@ -780,17 +774,6 @@ app.use(
   authenticateToken,
   createProxyMiddleware({
     target: `${IPFS_URL}/api/v0/dag/get`,
-    pathRewrite: {
-      '^/': '',
-    },
-  })
-);
-
-app.use(
-  '/api/v0/pin/add',
-  authenticateToken,
-  createProxyMiddleware({
-    target: `${IPFS_URL}/api/v0/pin/add`,
     pathRewrite: {
       '^/': '',
     },
