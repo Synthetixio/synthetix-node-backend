@@ -602,7 +602,7 @@ const getNamespacesFromContract = async (walletAddress) => {
 
   const ownerBalance = await NamespaceContract.balanceOf(walletAddress);
   if (ownerBalance === BigInt(0)) {
-    return [];
+    return new Set();
   }
 
   const ownerTokensArray = Array.from({ length: Number(ownerBalance) }, (_, index) => index);
@@ -673,6 +673,7 @@ app.post('/unique-namespace', authenticateToken, async (req, res, next) => {
 
   try {
     const namespaces = await getNamespacesFromContract(req.user.walletAddress);
+    console.log('Namespaces:', namespaces);
     res.status(200).json({ unique: !namespaces.has(req.body.namespace) });
   } catch (err) {
     next(err);
