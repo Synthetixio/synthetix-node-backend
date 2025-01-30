@@ -641,7 +641,7 @@ const getNamespacesFromContract = async (walletAddress) => {
     tokenChunksForNamespaces.push(tokenIds.slice(i, i + BATCH_SIZE));
   }
 
-  let namespaces = [];
+  const namespaces = new Set();
   for (const chunk of tokenChunksForNamespaces) {
     const calls = chunk.map((tokenId) => ({
       target: NamespaceAddress,
@@ -659,44 +659,62 @@ const getNamespacesFromContract = async (walletAddress) => {
       return NamespaceInterface.decodeFunctionResult('tokenIdToNamespace', returnData)[0];
     });
 
-    namespaces = namespaces.concat(results);
+    for (const namespace of results) {
+      if (namespace) namespaces.add(namespace);
+    }
   }
   return namespaces;
 };
 
-app.get('/namespaces', authenticateToken, async (req, res, next) => {
+app.post('/unique-namespace', authenticateToken, async (req, res, next) => {
+  if (!req.body.namespace) {
+    return next(new HttpError('Namespace not provided', 400));
+  }
+
   try {
-    res.status(200).json({ namespaces: await getNamespacesFromContract(req.user.walletAddress) });
+    const namespaces = await getNamespacesFromContract(req.user.walletAddress);
+    return res.json({ unique: !namespaces.has(req.body.namespace) });
   } catch (err) {
     next(err);
   }
 });
 
-const getGeneratedKey = (walletAddress) => {
-  return new Promise((resolve) => {
-    const keys = [];
-    gun
-      .get(generateHash(walletAddress.toLowerCase()))
-      .get('generated-keys')
-      .once(async (data) => {
-        if (data) {
-          const { _, ...rest } = data;
-          for (const [_key, ref] of Object.entries(rest)) {
-            if (ref?.['#']) {
-              const value = await new Promise((resolveKey) => {
-                gun.get(ref['#']).once((resolvedData) => {
-                  resolveKey(resolvedData);
-                });
-              });
+const checkGeneratedKey = async ({ walletAddress, key }) => {
+  return gun.get(generateHash(walletAddress.toLowerCase())).get('generated-keys').get(key);
+};
 
-              const { _, ...rest } = value;
-              keys.push(rest);
-            }
-          }
-        }
-        resolve(keys);
-      });
-  });
+app.post('/unique-generated-key', authenticateToken, async (req, res, next) => {
+  try {
+    const unique = await checkGeneratedKey({
+      walletAddress: req.user.walletAddress,
+      key: req.body.key,
+    });
+
+    res.status(200).json({ unique: !unique });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const removeMetaData = (o) => {
+  const { _, ...withoutMeta } = o;
+  return withoutMeta;
+};
+
+const getGeneratedKey = async (walletAddress) => {
+  const data = await gun.get(generateHash(walletAddress.toLowerCase())).get('generated-keys');
+
+  if (!data) {
+    return [];
+  }
+
+  return Promise.all(
+    Object.values(removeMetaData(data))
+      .filter((ref) => ref)
+      .map(async (ref) => {
+        return removeMetaData(await gun.get(ref));
+      })
+  );
 };
 
 app.get('/generated-keys', authenticateToken, async (req, res, next) => {
