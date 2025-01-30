@@ -673,7 +673,7 @@ app.post('/unique-namespace', authenticateToken, async (req, res, next) => {
 
   try {
     const namespaces = await getNamespacesFromContract(req.user.walletAddress);
-    return res.json({ unique: !namespaces.has(req.body.namespace) });
+    res.status(200).json({ unique: !namespaces.has(req.body.namespace) });
   } catch (err) {
     next(err);
   }
