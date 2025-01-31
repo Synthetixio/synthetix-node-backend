@@ -752,12 +752,12 @@ app.get('/screenshot', async (req, res, next) => {
   const { url } = req.query;
 
   if (!url) {
-    return next(new HttpError('URL parameter is required'));
+    return next(new HttpError('URL parameter is required', 400));
   }
 
   const urlPattern = /^(https?:\/\/[a-zA-Z0-9.-]+(:\d+)?\/ipns\/[a-zA-Z0-9\/_-]+)$/;
   if (!urlPattern.test(url)) {
-    return next(new HttpError('Invalid url'));
+    return next(new HttpError('Invalid url', 400));
   }
 
   let browser;
@@ -774,8 +774,7 @@ app.get('/screenshot', async (req, res, next) => {
     await browser.close();
 
     res.json({ image: `data:image/png;base64,${screenshotBase64}` });
-  } catch (error) {
-    console.error('Error generating screenshot:', error);
+  } catch {
     next(new HttpError('Failed to generate screenshot', 500));
   } finally {
     if (browser) {
