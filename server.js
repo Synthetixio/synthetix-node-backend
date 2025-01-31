@@ -751,28 +751,36 @@ app.use(
 app.get('/screenshot', async (req, res, next) => {
   const { url } = req.query;
 
-  // TODO: validate url with regexp
-
   if (!url) {
     return next(new HttpError('URL parameter is required'));
   }
 
+  const urlPattern = /^(https?:\/\/[a-zA-Z0-9.-]+(:\d+)?\/ipns\/[a-zA-Z0-9\/_-]+)$/;
+  if (!urlPattern.test(url)) {
+    return next(new HttpError('Invalid url'));
+  }
+
+  let browser;
   try {
-    const browser = await puppeteer.launch();
+    browser = await puppeteer.launch();
     const page = await browser.newPage();
+    await page.setViewport({ width: 1920, height: 1080 });
     await page.goto(url, {
       waitUntil: 'networkidle2',
     });
-    await page.screenshot({
-      path: 'hn.png',
+    const screenshotBase64 = await page.screenshot({
+      encoding: 'base64',
     });
     await browser.close();
 
-    res.set('Content-Type', 'image/png');
-    res.download('hn.png');
+    res.json({ image: `data:image/png;base64,${screenshotBase64}` });
   } catch (error) {
     console.error('Error generating screenshot:', error);
     next(new HttpError('Failed to generate screenshot', 500));
+  } finally {
+    if (browser) {
+      await browser.close();
+    }
   }
 });
 
