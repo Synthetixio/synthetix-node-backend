@@ -353,6 +353,39 @@ const verifyKeyGenNamespace = async (req, _res, next) => {
   }
 };
 
+const validateNamespace = (req, _res, next) => {
+  const namespace = req.query.arg;
+  const errors = [];
+
+  if (!namespace) {
+    errors.push('Namespace cannot be empty.');
+  }
+
+  if (namespace && (namespace.length < 3 || namespace.length > 30)) {
+    errors.push('Namespace must be between 3 and 30 characters long.');
+  }
+
+  if (namespace && !/^[a-z0-9-_]+$/.test(namespace)) {
+    errors.push(
+      'Namespace must be DNS-compatible: lowercase letters, numbers, dashes (-), or underscores (_).'
+    );
+  }
+
+  if (namespace && /^-|-$/.test(namespace)) {
+    errors.push('Namespace cannot start or end with a dash (-).');
+  }
+
+  if (namespace && /^_|_$/.test(namespace)) {
+    errors.push('Namespace cannot start or end with an underscore (_).');
+  }
+
+  if (errors.length > 0) {
+    return next(new HttpError(errors.join(' '), 400));
+  }
+
+  next();
+};
+
 const verifyNamePublishNamespace = async (req, _res, next) => {
   try {
     await validateNamespaceOwnership(req.query.key, req.user.walletAddress);
@@ -385,6 +418,7 @@ const saveGeneratedKey = ({ walletAddress, key, id }) => {
 app.use(
   '/api/v0/key/gen',
   authenticateToken,
+  validateNamespace,
   verifyKeyGenNamespace,
   createProxyMiddleware({
     target: `${IPFS_URL}/api/v0/key/gen`,
