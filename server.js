@@ -19,6 +19,9 @@ const PORT = process.env.PORT || 3005;
 const IPFS_HOST = process.env.IPFS_HOST || '127.0.0.1';
 const IPFS_PORT = process.env.IPFS_PORT || '5001';
 const IPFS_URL = `http://${IPFS_HOST}:${IPFS_PORT}/`;
+const IPFS_CLUSTER_PORT = process.env.IPFS_CLUSTER_PORT || '9095';
+const IPFS_CLUSTER_URL = `http://${IPFS_HOST}:${IPFS_CLUSTER_PORT}/`;
+
 const GRAPH_API_ENDPOINT =
   'https://api.studio.thegraph.com/query/71164/vd-practice-v1/version/latest';
 
@@ -473,10 +476,10 @@ app.use(
     },
     selfHandleResponse: true,
     on: {
-      proxyRes: responseInterceptor(async (responseBuffer, _proxyRes, req, res) => {
+      proxyRes: responseInterceptor(async (responseBuffer, proxyRes, req, res) => {
         try {
           res.removeHeader('trailer');
-          if (_proxyRes.statusCode < 400) {
+          if (proxyRes.statusCode < 400) {
             await Promise.all(
               JSON.parse(responseBuffer.toString('utf8')).Keys.map((k) =>
                 deleteGeneratedKey({
@@ -522,10 +525,10 @@ app.use(
     },
     selfHandleResponse: true,
     on: {
-      proxyRes: responseInterceptor(async (responseBuffer, _proxyRes, req, res) => {
+      proxyRes: responseInterceptor(async (responseBuffer, proxyRes, req, res) => {
         try {
           res.removeHeader('trailer');
-          if (_proxyRes.statusCode < 400) {
+          if (proxyRes.statusCode < 400) {
             await updateGeneratedKey({
               walletAddress: req.user.walletAddress,
               key: req.query.key,
@@ -766,6 +769,23 @@ app.use(
     target: `${IPFS_URL}/api/v0/dag/import`,
     pathRewrite: {
       '^/': '',
+    },
+    selfHandleResponse: true,
+    on: {
+      proxyRes: responseInterceptor(async (responseBuffer, _proxyRes, _req, res) => {
+        try {
+          res.removeHeader('trailer');
+          if (_proxyRes.statusCode < 400) {
+            const cid = JSON.parse(responseBuffer.toString('utf8')).Root?.Cid['/'];
+            if (cid) {
+              await fetch(`${IPFS_CLUSTER_URL}api/v0/pin/add?arg=${cid}`, { method: 'POST' });
+            }
+          }
+        } catch (e) {
+          console.error(e);
+        }
+        return responseBuffer;
+      }),
     },
   })
 );
