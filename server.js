@@ -212,7 +212,7 @@ const server = app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
   Promise.all([updateStats(), updatePeers()]);
 });
-const gun = Gun({ web: server });
+const gun = Gun({ web: server, file: process.env.GUNDB_STORAGE_PATH });
 
 const validateVerificationParameters = (req, _res, next) => {
   if (!req.body.nonce) {
