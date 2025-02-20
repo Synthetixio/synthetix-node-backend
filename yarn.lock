@@ -1472,6 +1472,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"ip@npm:^2.0.1":
+  version: 2.0.1
+  resolution: "ip@npm:2.0.1"
+  checksum: 10/d6dd154e1bc5e8725adfdd6fb92218635b9cbe6d873d051bd63b178f009777f751a5eea4c67021723a7056325fc3052f8b6599af0a2d56f042c93e684b4a0349
+  languageName: node
+  linkType: hard
+
 "ipaddr.js@npm:1.9.1":
   version: 1.9.1
   resolution: "ipaddr.js@npm:1.9.1"
@@ -2605,6 +2612,7 @@ __metadata:
     express: "npm:^4.21.2"
     gun: "npm:^0.2020.1240"
     http-proxy-middleware: "npm:^3.0.3"
+    ip: "npm:^2.0.1"
     jsonwebtoken: "npm:^9.0.2"
     nodemon: "npm:^3.1.9"
     puppeteer: "npm:^24.2.1"

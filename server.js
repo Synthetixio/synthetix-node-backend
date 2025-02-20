@@ -3,6 +3,7 @@ const cp = require('node:child_process');
 const { ethers, JsonRpcProvider, Contract } = require('ethers');
 const { address, abi } = require('@vderunov/whitelist-contract/deployments/11155420/Whitelist');
 const crypto = require('node:crypto');
+const ip = require('ip');
 const cors = require('cors');
 const puppeteer = require('puppeteer');
 const { Namespace: NamespaceAddress } = require('./namespace/11155420/deployments.json');
@@ -115,9 +116,38 @@ async function updateStats() {
   Object.assign(state, { dailyIn, hourlyIn, dailyOut, hourlyOut });
 }
 
+function getFirstPublicIp(addresses) {
+  for (const address of addresses) {
+    if (address.startsWith('/ip4/')) {
+      const match = address.match(/\/ip4\/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/);
+      if (match?.[1] && ip.isPublic(match[1])) {
+        return match[1];
+      }
+    }
+  }
+  return null;
+}
+
+async function getLocationByIp(ip) {
+  try {
+    const data = await (
+      await fetch(`http://ip-api.com/json/${ip}?fields=status,country,regionName,city`)
+    ).json();
+
+    if (data.status === 'success') {
+      return `${data.city}, ${data.regionName}, ${data.country}`;
+    }
+    console.warn(`IP localization failed for ${ip}: ${data.message}`);
+    return ip;
+  } catch (error) {
+    console.error(`Failed to fetch location for IP: ${ip}`, error);
+    return ip;
+  }
+}
+
 async function updatePeers() {
   const peers = await new Promise((resolve) =>
-    cp.exec("ipfs-cluster-ctl --enc=json peers ls | jq '[inputs]'", (err, stdout, stderr) => {
+    cp.exec("ipfs-cluster-ctl --enc=json peers ls | jq '[inputs]'", async (err, stdout, stderr) => {
       if (err) {
         console.error(err);
         return resolve([]);
@@ -128,11 +158,14 @@ async function updatePeers() {
       }
       try {
         const result = JSON.parse(stdout);
-        return resolve(
-          result
-            .map(({ id, version }) => ({ id, version }))
-            .sort((a, b) => a.id.localeCompare(b.id))
+        const peersWithLocations = await Promise.all(
+          result.map(async ({ id, version, addresses = [] }) => {
+            const publicIp = getFirstPublicIp(addresses);
+            if (!publicIp) return { id, version, location: 'No public IP available' };
+            return { id, version, location: await getLocationByIp(publicIp) };
+          })
         );
+        return resolve(peersWithLocations.sort((a, b) => a.id.localeCompare(b.id)));
       } catch (_e) {
         return resolve([]);
       }
