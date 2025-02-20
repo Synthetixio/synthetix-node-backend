@@ -159,8 +159,8 @@ async function updatePeers() {
       try {
         const result = JSON.parse(stdout);
         const peersWithLocations = await Promise.all(
-          result.map(async ({ id, version, addresses = [] }) => {
-            const publicIp = getFirstPublicIp(addresses);
+          result.map(async ({ id, version, addresses }) => {
+            const publicIp = getFirstPublicIp(addresses || []);
             if (!publicIp) return { id, version, location: 'No public IP available' };
             return { id, version, location: await getLocationByIp(publicIp) };
           })
