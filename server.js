@@ -815,12 +815,13 @@ app.get('/screenshot', async (req, res, next) => {
 
   let browser;
   try {
-    browser = await puppeteer.launch();
+    browser = await puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+    });
     const page = await browser.newPage();
     await page.setViewport({ width: 1920, height: 1080 });
-    await page.goto(url, {
-      waitUntil: 'networkidle2',
-    });
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 120000 });
     const screenshotBase64 = await page.screenshot({
       encoding: 'base64',
     });
