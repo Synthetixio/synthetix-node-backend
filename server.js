@@ -3,7 +3,9 @@ const cp = require('node:child_process');
 const { ethers, JsonRpcProvider, Contract } = require('ethers');
 const { address, abi } = require('@vderunov/whitelist-contract/deployments/11155420/Whitelist');
 const crypto = require('node:crypto');
+const ip = require('ip');
 const cors = require('cors');
+const puppeteer = require('puppeteer');
 const { Namespace: NamespaceAddress } = require('./namespace/11155420/deployments.json');
 const NamespaceAbi = require('./namespace/11155420/Namespace.json');
 const Multicall3 = require('./Multicall3/11155420/Multicall3');
@@ -18,6 +20,9 @@ const PORT = process.env.PORT || 3005;
 const IPFS_HOST = process.env.IPFS_HOST || '127.0.0.1';
 const IPFS_PORT = process.env.IPFS_PORT || '5001';
 const IPFS_URL = `http://${IPFS_HOST}:${IPFS_PORT}/`;
+const IPFS_CLUSTER_PORT = process.env.IPFS_CLUSTER_PORT || '9095';
+const IPFS_CLUSTER_URL = `http://${IPFS_HOST}:${IPFS_CLUSTER_PORT}/`;
+
 const GRAPH_API_ENDPOINT =
   'https://api.studio.thegraph.com/query/71164/vd-practice-v1/version/latest';
 
@@ -111,9 +116,38 @@ async function updateStats() {
   Object.assign(state, { dailyIn, hourlyIn, dailyOut, hourlyOut });
 }
 
+function getFirstPublicIp(addresses) {
+  for (const address of addresses) {
+    if (address.startsWith('/ip4/')) {
+      const match = address.match(/\/ip4\/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/);
+      if (match?.[1] && ip.isPublic(match[1])) {
+        return match[1];
+      }
+    }
+  }
+  return null;
+}
+
+async function getLocationByIp(ip) {
+  try {
+    const data = await (
+      await fetch(`http://ip-api.com/json/${ip}?fields=status,country,regionName,city`)
+    ).json();
+
+    if (data.status === 'success') {
+      return `${data.city}, ${data.regionName}, ${data.country}`;
+    }
+    console.warn(`IP localization failed for ${ip}: ${data.message}`);
+    return ip;
+  } catch (error) {
+    console.error(`Failed to fetch location for IP: ${ip}`, error);
+    return ip;
+  }
+}
+
 async function updatePeers() {
   const peers = await new Promise((resolve) =>
-    cp.exec("ipfs-cluster-ctl --enc=json peers ls | jq '[inputs]'", (err, stdout, stderr) => {
+    cp.exec("ipfs-cluster-ctl --enc=json peers ls | jq '[inputs]'", async (err, stdout, stderr) => {
       if (err) {
         console.error(err);
         return resolve([]);
@@ -124,11 +158,14 @@ async function updatePeers() {
       }
       try {
         const result = JSON.parse(stdout);
-        return resolve(
-          result
-            .map(({ id, version }) => ({ id, version }))
-            .sort((a, b) => a.id.localeCompare(b.id))
+        const peersWithLocations = await Promise.all(
+          result.map(async ({ id, version, addresses }) => {
+            const publicIp = getFirstPublicIp(addresses || []);
+            if (!publicIp) return { id, version, location: 'No public IP available' };
+            return { id, version, location: await getLocationByIp(publicIp) };
+          })
         );
+        return resolve(peersWithLocations.sort((a, b) => a.id.localeCompare(b.id)));
       } catch (_e) {
         return resolve([]);
       }
@@ -208,7 +245,7 @@ const server = app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
   Promise.all([updateStats(), updatePeers()]);
 });
-const gun = Gun({ web: server });
+const gun = Gun({ web: server, file: process.env.GUNDB_STORAGE_PATH });
 
 const validateVerificationParameters = (req, _res, next) => {
   if (!req.body.nonce) {
@@ -251,8 +288,8 @@ const createJwtToken = async (walletAddress) => {
 const saveTokenToGun = (walletAddress, encryptedToken) => {
   return new Promise((resolve, reject) => {
     gun
-      .get('tokens')
       .get(generateHash(walletAddress.toLowerCase()))
+      .get('tokens')
       .put(encryptedToken, (ack) => {
         if (ack.err) {
           reject(new HttpError('Failed to save token to Gun'));
@@ -300,8 +337,8 @@ const verifyToken = (req) => {
 const validateTokenWithGun = (walletAddress, token) => {
   return new Promise((resolve, reject) => {
     gun
-      .get('tokens')
       .get(generateHash(walletAddress.toLowerCase()))
+      .get('tokens')
       .once(async (tokenData) => {
         if (!tokenData || (await decrypt(tokenData)) !== generateHash(token)) {
           reject(new HttpError('Unauthorized', 401));
@@ -352,6 +389,39 @@ const verifyKeyGenNamespace = async (req, _res, next) => {
   }
 };
 
+const validateNamespace = (req, _res, next) => {
+  const namespace = req.query.arg;
+  const errors = [];
+
+  if (!namespace) {
+    errors.push('Namespace cannot be empty.');
+  }
+
+  if (namespace && (namespace.length < 3 || namespace.length > 30)) {
+    errors.push('Namespace must be between 3 and 30 characters long.');
+  }
+
+  if (namespace && !/^[a-z0-9-_]+$/.test(namespace)) {
+    errors.push(
+      'Namespace must be DNS-compatible: lowercase letters, numbers, dashes (-), or underscores (_).'
+    );
+  }
+
+  if (namespace && /^-|-$/.test(namespace)) {
+    errors.push('Namespace cannot start or end with a dash (-).');
+  }
+
+  if (namespace && /^_|_$/.test(namespace)) {
+    errors.push('Namespace cannot start or end with an underscore (_).');
+  }
+
+  if (errors.length > 0) {
+    return next(new HttpError(errors.join(' '), 400));
+  }
+
+  next();
+};
+
 const verifyNamePublishNamespace = async (req, _res, next) => {
   try {
     await validateNamespaceOwnership(req.query.key, req.user.walletAddress);
@@ -365,13 +435,13 @@ app.get('/protected', authenticateToken, (_req, res) => {
   res.send('Hello! You are viewing protected content.');
 });
 
-const saveIpnsKeysToGun = (walletAddress, key, value) => {
+const saveGeneratedKey = ({ walletAddress, key, id }) => {
   return new Promise((resolve, reject) => {
     gun
-      .get('ipns-keys')
       .get(generateHash(walletAddress.toLowerCase()))
+      .get('generated-keys')
       .get(key)
-      .put(value, (ack) => {
+      .put({ key, id, published: false }, (ack) => {
         if (ack.err) {
           reject(new HttpError(`Failed to save ipns keys to Gun: ${ack.err}`));
         } else {
@@ -384,6 +454,7 @@ const saveIpnsKeysToGun = (walletAddress, key, value) => {
 app.use(
   '/api/v0/key/gen',
   authenticateToken,
+  validateNamespace,
   verifyKeyGenNamespace,
   createProxyMiddleware({
     target: `${IPFS_URL}/api/v0/key/gen`,
@@ -396,11 +467,11 @@ app.use(
         try {
           res.removeHeader('trailer');
           if (_proxyRes.statusCode < 400) {
-            await saveIpnsKeysToGun(
-              req.user.walletAddress,
-              req.query.arg,
-              JSON.parse(responseBuffer.toString('utf8')).Name
-            );
+            await saveGeneratedKey({
+              walletAddress: req.user.walletAddress,
+              key: req.query.arg,
+              id: JSON.parse(responseBuffer.toString('utf8')).Id,
+            });
           }
         } catch (err) {
           console.error('Error saving to Gun:', err.message);
@@ -411,15 +482,15 @@ app.use(
   })
 );
 
-const removeIpnsKeysFromGun = (walletAddress, name) => {
+const deleteGeneratedKey = ({ walletAddress, key }) => {
   return new Promise((resolve, reject) => {
     gun
-      .get('ipns-keys')
       .get(generateHash(walletAddress.toLowerCase()))
-      .get(name)
+      .get('generated-keys')
+      .get(key)
       .put(null, (ack) => {
         if (ack.err) {
-          reject(new HttpError(`Failed to remove ipns key from Gun: ${ack.err}`));
+          reject(new HttpError(`Failed to delete key: ${ack.err}`));
         } else {
           resolve();
         }
@@ -438,13 +509,16 @@ app.use(
     },
     selfHandleResponse: true,
     on: {
-      proxyRes: responseInterceptor(async (responseBuffer, _proxyRes, req, res) => {
+      proxyRes: responseInterceptor(async (responseBuffer, proxyRes, req, res) => {
         try {
           res.removeHeader('trailer');
-          if (_proxyRes.statusCode < 400) {
+          if (proxyRes.statusCode < 400) {
             await Promise.all(
               JSON.parse(responseBuffer.toString('utf8')).Keys.map((k) =>
-                removeIpnsKeysFromGun(req.user.walletAddress, k.Name)
+                deleteGeneratedKey({
+                  walletAddress: req.user.walletAddress,
+                  key: k.Name,
+                })
               )
             );
           }
@@ -457,15 +531,15 @@ app.use(
   })
 );
 
-const saveDeploymentsToGun = (walletAddress, key, value) => {
+const updateGeneratedKey = ({ walletAddress, key, updates }) => {
   return new Promise((resolve, reject) => {
     gun
-      .get('deployments')
       .get(generateHash(walletAddress.toLowerCase()))
+      .get('generated-keys')
       .get(key)
-      .put(value, (ack) => {
+      .put(updates, (ack) => {
         if (ack.err) {
-          reject(new HttpError(`Failed to save deployment to Gun: ${ack.err}`));
+          reject(new HttpError(`Failed to update key: ${ack.err}`));
         } else {
           resolve();
         }
@@ -484,15 +558,18 @@ app.use(
     },
     selfHandleResponse: true,
     on: {
-      proxyRes: responseInterceptor(async (responseBuffer, _proxyRes, req, res) => {
+      proxyRes: responseInterceptor(async (responseBuffer, proxyRes, req, res) => {
         try {
           res.removeHeader('trailer');
-          if (_proxyRes.statusCode < 400) {
-            await saveDeploymentsToGun(
-              req.user.walletAddress,
-              req.query.key,
-              JSON.parse(responseBuffer.toString('utf8')).Name
-            );
+          if (proxyRes.statusCode < 400) {
+            await updateGeneratedKey({
+              walletAddress: req.user.walletAddress,
+              key: req.query.key,
+              updates: {
+                ipfs: JSON.parse(responseBuffer.toString('utf8')).Value,
+                published: true,
+              },
+            });
           }
         } catch (err) {
           console.error('Error saving to Gun:', err.message);
@@ -587,37 +664,6 @@ app.post('/refresh-token', validateWalletAddress, authenticateToken, async (req,
   }
 });
 
-const getDeploymentsFromGun = (walletAddress) => {
-  return new Promise((resolve) => {
-    gun
-      .get('deployments')
-      .get(generateHash(walletAddress.toLowerCase()))
-      .once((data) => {
-        if (data) {
-          const { _, ...deploymentData } = data;
-          resolve(
-            Object.entries(deploymentData)
-              .filter(([_, value]) => value !== null)
-              .map(([name, value]) => ({
-                name,
-                value,
-              }))
-          );
-        } else {
-          resolve([]);
-        }
-      });
-  });
-};
-
-app.get('/deployments', authenticateToken, async (req, res, next) => {
-  try {
-    res.status(200).json(await getDeploymentsFromGun(req.user.walletAddress));
-  } catch (err) {
-    next(err);
-  }
-});
-
 const getNamespacesFromContract = async (walletAddress) => {
   const NamespaceContract = getNamespaceContract();
   const Multicall3Contract = getMulticall3Contract();
@@ -626,7 +672,7 @@ const getNamespacesFromContract = async (walletAddress) => {
 
   const ownerBalance = await NamespaceContract.balanceOf(walletAddress);
   if (ownerBalance === BigInt(0)) {
-    return [];
+    return new Set();
   }
 
   const ownerTokensArray = Array.from({ length: Number(ownerBalance) }, (_, index) => index);
@@ -665,7 +711,7 @@ const getNamespacesFromContract = async (walletAddress) => {
     tokenChunksForNamespaces.push(tokenIds.slice(i, i + BATCH_SIZE));
   }
 
-  let namespaces = [];
+  const namespaces = new Set();
   for (const chunk of tokenChunksForNamespaces) {
     const calls = chunk.map((tokenId) => ({
       target: NamespaceAddress,
@@ -683,76 +729,67 @@ const getNamespacesFromContract = async (walletAddress) => {
       return NamespaceInterface.decodeFunctionResult('tokenIdToNamespace', returnData)[0];
     });
 
-    namespaces = namespaces.concat(results);
+    for (const namespace of results) {
+      if (namespace) namespaces.add(namespace);
+    }
   }
   return namespaces;
 };
 
-app.get('/namespaces', authenticateToken, async (req, res, next) => {
+app.post('/unique-namespace', authenticateToken, async (req, res, next) => {
+  if (!req.body.namespace) {
+    return next(new HttpError('Namespace not provided', 400));
+  }
+
   try {
-    res.status(200).json({ namespaces: await getNamespacesFromContract(req.user.walletAddress) });
+    const namespaces = await getNamespacesFromContract(req.user.walletAddress);
+    res.status(200).json({ unique: !namespaces.has(req.body.namespace) });
   } catch (err) {
     next(err);
   }
 });
 
-app.get('/unpublished-namespaces', authenticateToken, async (req, res, next) => {
-  try {
-    const [deployments, ipnsKeys] = await Promise.all([
-      getDeploymentsFromGun(req.user.walletAddress),
-      getIpnsKeysFromGun(req.user.walletAddress),
-    ]);
-    const deployedNames = new Set(deployments.map((d) => d.name));
-    const unpublishedNamespaces = ipnsKeys.filter(
-      (key) => key.value !== null && !deployedNames.has(key.name)
-    );
-    res.status(200).json({ namespaces: unpublishedNamespaces.map(({ name }) => name) });
-  } catch (err) {
-    next(err);
-  }
-});
-
-const getIpnsKeysFromGun = (walletAddress) => {
-  return new Promise((resolve) => {
-    gun
-      .get('ipns-keys')
-      .get(generateHash(walletAddress.toLowerCase()))
-      .once((data) => {
-        if (data) {
-          const { _, ...ipnsKeysData } = data;
-          resolve(
-            Object.entries(ipnsKeysData).map(([name, value]) => ({
-              name,
-              value,
-            }))
-          );
-        } else {
-          resolve([]);
-        }
-      });
-  });
+const checkGeneratedKey = async ({ walletAddress, key }) => {
+  return gun.get(generateHash(walletAddress.toLowerCase())).get('generated-keys').get(key);
 };
 
-app.get('/ipns-keys', authenticateToken, async (req, res, next) => {
+app.post('/unique-generated-key', authenticateToken, async (req, res, next) => {
   try {
-    const [namespaces, ipnsKeys] = await Promise.all([
-      getNamespacesFromContract(req.user.walletAddress),
-      getIpnsKeysFromGun(req.user.walletAddress),
-    ]);
-    const ipnsKeysSet = ipnsKeys.reduce((set, { name, value }) => {
-      if (value !== null) set.add(name);
-      return set;
-    }, new Set());
-    res.status(200).json({ keys: namespaces.filter((n) => !ipnsKeysSet.has(n)) });
+    const unique = await checkGeneratedKey({
+      walletAddress: req.user.walletAddress,
+      key: req.body.key,
+    });
+
+    res.status(200).json({ unique: !unique });
   } catch (err) {
     next(err);
   }
 });
 
-app.get('/generated-ipns-keys', authenticateToken, async (req, res, next) => {
-  const ipnsKeys = await getIpnsKeysFromGun(req.user.walletAddress);
+const removeMetaData = (o) => {
+  const { _, ...withoutMeta } = o;
+  return withoutMeta;
+};
+
+const getGeneratedKey = async (walletAddress) => {
+  const data = await gun.get(generateHash(walletAddress.toLowerCase())).get('generated-keys');
+
+  if (!data) {
+    return [];
+  }
+
+  return Promise.all(
+    Object.values(removeMetaData(data))
+      .filter((ref) => ref)
+      .map(async (ref) => {
+        return removeMetaData(await gun.get(ref));
+      })
+  );
+};
+
+app.get('/generated-keys', authenticateToken, async (req, res, next) => {
   try {
-    res.status(200).json({ keys: ipnsKeys.filter((item) => item.value !== null) });
+    res.status(200).json({ keys: await getGeneratedKey(req.user.walletAddress) });
   } catch (err) {
     next(err);
   }
@@ -765,6 +802,23 @@ app.use(
     target: `${IPFS_URL}/api/v0/dag/import`,
     pathRewrite: {
       '^/': '',
+    },
+    selfHandleResponse: true,
+    on: {
+      proxyRes: responseInterceptor(async (responseBuffer, _proxyRes, _req, res) => {
+        try {
+          res.removeHeader('trailer');
+          if (_proxyRes.statusCode < 400) {
+            const cid = JSON.parse(responseBuffer.toString('utf8')).Root?.Cid['/'];
+            if (cid) {
+              await fetch(`${IPFS_CLUSTER_URL}api/v0/pin/add?arg=${cid}`, { method: 'POST' });
+            }
+          }
+        } catch (e) {
+          console.error(e);
+        }
+        return responseBuffer;
+      }),
     },
   })
 );
@@ -779,6 +833,42 @@ app.use(
     },
   })
 );
+
+app.get('/screenshot', async (req, res, next) => {
+  const { url } = req.query;
+
+  if (!url) {
+    return next(new HttpError('URL parameter is required', 400));
+  }
+
+  const urlPattern = /^(https?:\/\/[a-zA-Z0-9.-]+(:\d+)?\/ipns\/[a-zA-Z0-9\/_-]+)$/;
+  if (!urlPattern.test(url)) {
+    return next(new HttpError('Invalid url', 400));
+  }
+
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+    });
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1920, height: 1080 });
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 120000 });
+    const screenshotBase64 = await page.screenshot({
+      encoding: 'base64',
+    });
+    await browser.close();
+
+    res.json({ image: `data:image/png;base64,${screenshotBase64}` });
+  } catch {
+    next(new HttpError('Failed to generate screenshot', 500));
+  } finally {
+    if (browser) {
+      await browser.close();
+    }
+  }
+});
 
 app.use((err, _req, res, _next) => {
   const status = err.code || 500;
