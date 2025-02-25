@@ -562,34 +562,6 @@ app.use(
         try {
           res.removeHeader('trailer');
           if (proxyRes.statusCode < 400) {
-            const publishedCID = JSON.parse(responseBuffer.toString('utf8')).Value.replace(
-              '/ipfs/',
-              ''
-            );
-
-            const cids = await getCidsFromGeneratedKey({
-              walletAddress: req.user.walletAddress,
-              key: req.query.key,
-            });
-
-            const cidsToRemoveFromIpfs = cids.filter((cid) => cid !== publishedCID);
-
-            if (cidsToRemoveFromIpfs.length > 0) {
-              await Promise.all(
-                cidsToRemoveFromIpfs.map((cid) =>
-                  fetch(`${IPFS_CLUSTER_URL}api/v0/pin/rm?arg=${cid}`, { method: 'POST' }).catch(
-                    (err) => console.error(`Failed to remove CID ${cid}:`, err.message)
-                  )
-                )
-              );
-
-              await deleteCidsFromGeneratedKey({
-                walletAddress: req.user.walletAddress,
-                key: req.query.key,
-                publishedCID,
-              });
-            }
-
             await updateGeneratedKey({
               walletAddress: req.user.walletAddress,
               key: req.query.key,
@@ -823,6 +795,51 @@ app.get('/generated-keys', authenticateToken, async (req, res, next) => {
   }
 });
 
+app.get('/cids', authenticateToken, async (req, res, next) => {
+  try {
+    if (!req.query.key) {
+      return next(new HttpError('Key missed.', 400));
+    }
+
+    res.status(200).json({
+      cids: await getCidsFromGeneratedKey({
+        walletAddress: req.user.walletAddress,
+        key: req.query.key,
+      }),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/remove-cid', authenticateToken, async (req, res, next) => {
+  try {
+    const { cid, key } = req.body;
+
+    if (!cid) {
+      return next(new HttpError('CID missed.', 400));
+    }
+    if (!key) {
+      return next(new HttpError('Key missed.', 400));
+    }
+
+    const response = await fetch(`${IPFS_CLUSTER_URL}api/v0/pin/rm?arg=${cid}`, { method: 'POST' });
+    if (!response.ok) {
+      throw new HttpError(`Failed to remove CID ${cid} from IPFS`);
+    }
+
+    await deleteCidFromGeneratedKey({
+      walletAddress: req.user.walletAddress,
+      key,
+      cid,
+    });
+
+    res.status(200).json({ success: true, cid });
+  } catch (err) {
+    next(err);
+  }
+});
+
 const addCidToGeneratedKey = ({ walletAddress, key, cid }) => {
   return new Promise((resolve) => {
     gun
@@ -831,7 +848,7 @@ const addCidToGeneratedKey = ({ walletAddress, key, cid }) => {
       .get(key)
       .get('cids')
       .get(cid)
-      .put({ cid }, () => resolve());
+      .put({ cid }, resolve);
   });
 };
 
@@ -856,30 +873,15 @@ const getCidsFromGeneratedKey = ({ walletAddress, key }) => {
   });
 };
 
-const deleteCidsFromGeneratedKey = ({ walletAddress, key, publishedCID }) => {
+const deleteCidFromGeneratedKey = ({ walletAddress, key, cid }) => {
   return new Promise((resolve) => {
-    const cidsNode = gun
+    gun
       .get(generateHash(walletAddress.toLowerCase()))
       .get('generated-keys')
       .get(key)
-      .get('cids');
-
-    cidsNode.once((node) => {
-      if (!node) {
-        return resolve();
-      }
-
-      const cids = Object.entries(removeMetaData(node))
-        .filter(([_, value]) => value !== null)
-        .map(([key]) => key);
-
-      for (const prop of cids) {
-        if (prop !== publishedCID) {
-          cidsNode.get(prop).put(null);
-        }
-      }
-      resolve();
-    });
+      .get('cids')
+      .get(cid)
+      .put(null, resolve);
   });
 };
 
