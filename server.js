@@ -812,15 +812,27 @@ app.get('/cids', authenticateToken, async (req, res, next) => {
   }
 });
 
-app.post('/remove-cid', authenticateToken, async (req, res, next) => {
+const verifyRemoveCidNamespace = async (req, _res, next) => {
+  try {
+    const { key } = req.body;
+
+    if (!key) {
+      throw new HttpError('Key missed.', 400);
+    }
+
+    await validateNamespaceOwnership(key, req.user.walletAddress);
+    next();
+  } catch (err) {
+    next(err);
+  }
+};
+
+app.post('/remove-cid', authenticateToken, verifyRemoveCidNamespace, async (req, res, next) => {
   try {
     const { cid, key } = req.body;
 
     if (!cid) {
       return next(new HttpError('CID missed.', 400));
-    }
-    if (!key) {
-      return next(new HttpError('Key missed.', 400));
     }
 
     const response = await fetch(`${IPFS_CLUSTER_URL}api/v0/pin/rm?arg=${cid}`, { method: 'POST' });
