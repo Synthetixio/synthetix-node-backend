@@ -795,12 +795,20 @@ app.get('/generated-keys', authenticateToken, async (req, res, next) => {
   }
 });
 
-app.get('/cids', authenticateToken, async (req, res, next) => {
+const verifyCidNamespace = async (req, _res, next) => {
   try {
     if (!req.query.key) {
-      return next(new HttpError('Key missed.', 400));
+      throw new HttpError('Key missed.', 400);
     }
+    await validateNamespaceOwnership(req.query.key, req.user.walletAddress);
+    next();
+  } catch (err) {
+    next(err);
+  }
+};
 
+app.get('/cids', authenticateToken, verifyCidNamespace, async (req, res, next) => {
+  try {
     res.status(200).json({
       cids: await getCidsFromGeneratedKey({
         walletAddress: req.user.walletAddress,
@@ -814,13 +822,10 @@ app.get('/cids', authenticateToken, async (req, res, next) => {
 
 const verifyRemoveCidNamespace = async (req, _res, next) => {
   try {
-    const { key } = req.body;
-
-    if (!key) {
+    if (!req.body.key) {
       throw new HttpError('Key missed.', 400);
     }
-
-    await validateNamespaceOwnership(key, req.user.walletAddress);
+    await validateNamespaceOwnership(req.body.key, req.user.walletAddress);
     next();
   } catch (err) {
     next(err);
