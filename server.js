@@ -1,13 +1,12 @@
 const express = require('express');
 const cp = require('node:child_process');
 const { ethers, JsonRpcProvider, Contract } = require('ethers');
-const { address, abi } = require('@vderunov/whitelist-contract/deployments/11155420/Whitelist');
 const crypto = require('node:crypto');
 const ip = require('ip');
 const cors = require('cors');
 const puppeteer = require('puppeteer');
-const { Namespace: NamespaceAddress } = require('./namespace/11155420/deployments.json');
-const NamespaceAbi = require('./namespace/11155420/Namespace.json');
+const Whitelist = require('@synthetixio/synthetix-node-namespace/deployments/11155420/Whitelist');
+const Namespace = require('@synthetixio/synthetix-node-namespace/deployments/11155420/Namespace');
 const Multicall3 = require('./Multicall3/11155420/Multicall3');
 const Gun = require('gun');
 const jwt = require('jsonwebtoken');
@@ -207,8 +206,8 @@ const getContract = (address, abi) => {
   }
 };
 const getMulticall3Contract = () => getContract(Multicall3.address, Multicall3.abi);
-const getNamespaceContract = () => getContract(NamespaceAddress, NamespaceAbi);
-const getWhitelistContract = () => getContract(address, abi);
+const getNamespaceContract = () => getContract(Namespace.address, Namespace.abi);
+const getWhitelistContract = () => getContract(Whitelist.address, Whitelist.abi);
 
 const validateWalletAddress = (req, _res, next) => {
   if (!req.body.walletAddress) {
@@ -367,7 +366,7 @@ const authenticateToken = async (req, _res, next) => {
 
 const validateNamespaceOwnership = async (namespace, walletAddress) => {
   if (!namespace) {
-    throw new HttpError('Missing namespace parameter', 400);
+    throw new HttpError('Missing namespace', 400);
   }
   const contract = await getNamespaceContract();
   const tokenId = await contract.namespaceToTokenId(namespace);
@@ -376,7 +375,7 @@ const validateNamespaceOwnership = async (namespace, walletAddress) => {
     throw new HttpError('Namespace not found', 404);
   }
   if ((await contract.ownerOf(tokenId)).toLowerCase() !== walletAddress.toLowerCase()) {
-    throw new HttpError('Not namespace owner', 403);
+    throw new HttpError('Not a namespace owner', 403);
   }
 };
 
@@ -668,7 +667,7 @@ const getNamespacesFromContract = async (walletAddress) => {
   const NamespaceContract = getNamespaceContract();
   const Multicall3Contract = getMulticall3Contract();
 
-  const NamespaceInterface = new ethers.Interface(NamespaceAbi);
+  const NamespaceInterface = new ethers.Interface(Namespace.abi);
 
   const ownerBalance = await NamespaceContract.balanceOf(walletAddress);
   if (ownerBalance === BigInt(0)) {
@@ -685,7 +684,7 @@ const getNamespacesFromContract = async (walletAddress) => {
   let tokenIds = [];
   for (const chunk of tokenChunks) {
     const calls = chunk.map((index) => ({
-      target: NamespaceAddress,
+      target: Namespace.address,
       allowFailure: true,
       callData: NamespaceInterface.encodeFunctionData('tokenOfOwnerByIndex', [
         walletAddress,
@@ -714,7 +713,7 @@ const getNamespacesFromContract = async (walletAddress) => {
   const namespaces = new Set();
   for (const chunk of tokenChunksForNamespaces) {
     const calls = chunk.map((tokenId) => ({
-      target: NamespaceAddress,
+      target: Namespace.address,
       allowFailure: true,
       callData: NamespaceInterface.encodeFunctionData('tokenIdToNamespace', [tokenId]),
     }));
@@ -738,7 +737,7 @@ const getNamespacesFromContract = async (walletAddress) => {
 
 app.post('/unique-namespace', authenticateToken, async (req, res, next) => {
   if (!req.body.namespace) {
-    return next(new HttpError('Namespace not provided', 400));
+    return next(new HttpError('Missing namespace', 400));
   }
 
   try {
@@ -798,7 +797,7 @@ app.get('/generated-keys', authenticateToken, async (req, res, next) => {
 const verifyCidNamespace = async (req, _res, next) => {
   try {
     if (!req.query.key) {
-      throw new HttpError('Key missed.', 400);
+      throw new HttpError('Missing key', 400);
     }
     await validateNamespaceOwnership(req.query.key, req.user.walletAddress);
     next();
@@ -823,7 +822,7 @@ app.get('/cids', authenticateToken, verifyCidNamespace, async (req, res, next) =
 const verifyRemoveCidNamespace = async (req, _res, next) => {
   try {
     if (!req.body.key) {
-      throw new HttpError('Key missed.', 400);
+      throw new HttpError('Missing key', 400);
     }
     await validateNamespaceOwnership(req.body.key, req.user.walletAddress);
     next();

@@ -9,7 +9,7 @@
     "lint": "biome check --write ."
   },
   "dependencies": {
-    "@vderunov/whitelist-contract": "^2.0.0",
+    "@synthetixio/synthetix-node-namespace": "^0.1.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "ethers": "^6.13.5",
@@ -21,7 +21,7 @@
     "puppeteer": "^24.2.1"
   },
   "devDependencies": {
-    "@biomejs/biome": "1.9.4",
+    "@biomejs/biome": "^1.9.4",
     "nodemon": "^3.1.9"
   }
 }
