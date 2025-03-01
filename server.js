@@ -7,7 +7,7 @@ const cors = require('cors');
 const puppeteer = require('puppeteer');
 const Whitelist = require('@synthetixio/synthetix-node-namespace/deployments/11155420/Whitelist');
 const Namespace = require('@synthetixio/synthetix-node-namespace/deployments/11155420/Namespace');
-const Multicall3 = require('./Multicall3/11155420/Multicall3');
+//const Multicall3 = require('./Multicall3/11155420/Multicall3');
 const Gun = require('gun');
 const jwt = require('jsonwebtoken');
 const app = express();
@@ -16,11 +16,10 @@ const { createProxyMiddleware, responseInterceptor } = require('http-proxy-middl
 
 const PORT = process.env.PORT || 3005;
 
-const IPFS_HOST = process.env.IPFS_HOST || '127.0.0.1';
-const IPFS_PORT = process.env.IPFS_PORT || '5001';
-const IPFS_URL = `http://${IPFS_HOST}:${IPFS_PORT}/`;
-const IPFS_CLUSTER_PORT = process.env.IPFS_CLUSTER_PORT || '9095';
-const IPFS_CLUSTER_URL = `http://${IPFS_HOST}:${IPFS_CLUSTER_PORT}/`;
+const {
+  UPSTREAM_IPFS_URL = 'http://127.0.0.1:5001',
+  UPSTREAM_IPFS_CLUSTER_URL = 'http://127.0.0.1:9095',
+} = process.env;
 
 const GRAPH_API_ENDPOINT =
   'https://api.studio.thegraph.com/query/71164/vd-practice-v1/version/latest';
@@ -48,7 +47,7 @@ app.get('/api', (_req, res) => {
 async function updateStats() {
   try {
     const { RepoSize: repoSize, NumObjects: numObjects } = await (
-      await fetch(`${IPFS_URL}api/v0/repo/stat`, { method: 'POST' })
+      await fetch(`${UPSTREAM_IPFS_URL}/api/v0/repo/stat`, { method: 'POST' })
     ).json();
     Object.assign(state, { repoSize, numObjects });
   } catch (e) {
@@ -57,7 +56,7 @@ async function updateStats() {
 
   try {
     const { TotalIn: totalIn, TotalOut: totalOut } = await (
-      await fetch(`${IPFS_URL}api/v0/stats/bw`, { method: 'POST' })
+      await fetch(`${UPSTREAM_IPFS_URL}/api/v0/stats/bw`, { method: 'POST' })
     ).json();
     Object.assign(state, { totalIn, totalOut });
   } catch (e) {
@@ -205,7 +204,7 @@ const getContract = (address, abi) => {
     throw new EthereumContractError('Failed to get contract', err);
   }
 };
-const getMulticall3Contract = () => getContract(Multicall3.address, Multicall3.abi);
+//const getMulticall3Contract = () => getContract(Multicall3.address, Multicall3.abi);
 const getNamespaceContract = () => getContract(Namespace.address, Namespace.abi);
 const getWhitelistContract = () => getContract(Whitelist.address, Whitelist.abi);
 
@@ -313,7 +312,7 @@ app.post('/verify', validateVerificationParameters, verifyMessage, async (_req, 
 app.use(
   '/api/v0/cat',
   createProxyMiddleware({
-    target: `${IPFS_URL}/api/v0/cat`,
+    target: `${UPSTREAM_IPFS_URL}/api/v0/cat`,
     pathRewrite: {
       '^/': '',
     },
@@ -388,8 +387,7 @@ const verifyKeyGenNamespace = async (req, _res, next) => {
   }
 };
 
-const validateNamespace = (req, _res, next) => {
-  const namespace = req.query.arg;
+const validateNamespace = (namespace, next) => {
   const errors = [];
 
   if (!namespace) {
@@ -453,19 +451,22 @@ const saveGeneratedKey = ({ walletAddress, key, id }) => {
 app.use(
   '/api/v0/key/gen',
   authenticateToken,
-  validateNamespace,
+  (req, _res, next) => validateNamespace(req.query.arg, next),
   verifyKeyGenNamespace,
   createProxyMiddleware({
-    target: `${IPFS_URL}/api/v0/key/gen`,
+    target: `${UPSTREAM_IPFS_URL}/api/v0/key/gen`,
     pathRewrite: {
       '^/': '',
     },
     selfHandleResponse: true,
     on: {
-      proxyRes: responseInterceptor(async (responseBuffer, _proxyRes, req, res) => {
+      proxyReq: function onProxyReq(proxyReq) {
+        proxyReq.removeHeader('authorization');
+      },
+      proxyRes: responseInterceptor(async (responseBuffer, proxyRes, req, res) => {
         try {
           res.removeHeader('trailer');
-          if (_proxyRes.statusCode < 400) {
+          if (proxyRes.statusCode < 400) {
             await saveGeneratedKey({
               walletAddress: req.user.walletAddress,
               key: req.query.arg,
@@ -502,7 +503,7 @@ app.use(
   authenticateToken,
   verifyKeyGenNamespace,
   createProxyMiddleware({
-    target: `${IPFS_URL}/api/v0/key/rm`,
+    target: `${UPSTREAM_IPFS_URL}/api/v0/key/rm`,
     pathRewrite: {
       '^/': '',
     },
@@ -551,7 +552,7 @@ app.use(
   authenticateToken,
   verifyNamePublishNamespace,
   createProxyMiddleware({
-    target: `${IPFS_URL}/api/v0/name/publish`,
+    target: `${UPSTREAM_IPFS_URL}/api/v0/name/publish`,
     pathRewrite: {
       '^/': '',
     },
@@ -663,90 +664,105 @@ app.post('/refresh-token', validateWalletAddress, authenticateToken, async (req,
   }
 });
 
-const getNamespacesFromContract = async (walletAddress) => {
-  const NamespaceContract = getNamespaceContract();
-  const Multicall3Contract = getMulticall3Contract();
+//const getNamespacesFromContract = async (walletAddress) => {
+//  const NamespaceContract = getNamespaceContract();
+//  const Multicall3Contract = getMulticall3Contract();
+//
+//  const NamespaceInterface = new ethers.Interface(Namespace.abi);
+//
+//  const ownerBalance = await NamespaceContract.balanceOf(walletAddress);
+//  if (ownerBalance === BigInt(0)) {
+//    return new Set();
+//  }
+//
+//  const ownerTokensArray = Array.from({ length: Number(ownerBalance) }, (_, index) => index);
+//  const BATCH_SIZE = 500;
+//  const tokenChunks = [];
+//  for (let i = 0; i < ownerTokensArray.length; i += BATCH_SIZE) {
+//    tokenChunks.push(ownerTokensArray.slice(i, i + BATCH_SIZE));
+//  }
+//
+//  let tokenIds = [];
+//  for (const chunk of tokenChunks) {
+//    const calls = chunk.map((index) => ({
+//      target: Namespace.address,
+//      allowFailure: true,
+//      callData: NamespaceInterface.encodeFunctionData('tokenOfOwnerByIndex', [
+//        walletAddress,
+//        index,
+//      ]),
+//    }));
+//
+//    const multicallResults = await Multicall3Contract.aggregate3.staticCall(calls);
+//
+//    const results = multicallResults.map(({ success, returnData }, i) => {
+//      if (!success) {
+//        console.error(`Failed to retrieve token ID for index: ${chunk[i]}`);
+//        return null;
+//      }
+//      return NamespaceInterface.decodeFunctionResult('tokenOfOwnerByIndex', returnData)[0];
+//    });
+//
+//    tokenIds = tokenIds.concat(results);
+//  }
+//
+//  const tokenChunksForNamespaces = [];
+//  for (let i = 0; i < tokenIds.length; i += BATCH_SIZE) {
+//    tokenChunksForNamespaces.push(tokenIds.slice(i, i + BATCH_SIZE));
+//  }
+//
+//  const namespaces = new Set();
+//  for (const chunk of tokenChunksForNamespaces) {
+//    const calls = chunk.map((tokenId) => ({
+//      target: Namespace.address,
+//      allowFailure: true,
+//      callData: NamespaceInterface.encodeFunctionData('tokenIdToNamespace', [tokenId]),
+//    }));
+//
+//    const multicallResults = await Multicall3Contract.aggregate3.staticCall(calls);
+//
+//    const results = multicallResults.map(({ success, returnData }, i) => {
+//      if (!success) {
+//        console.error(`Failed to fetch namespace for token ID ${chunk[i]}`);
+//        return null;
+//      }
+//      return NamespaceInterface.decodeFunctionResult('tokenIdToNamespace', returnData)[0];
+//    });
+//
+//    for (const namespace of results) {
+//      if (namespace) namespaces.add(namespace);
+//    }
+//  }
+//  return namespaces;
+//};
 
-  const NamespaceInterface = new ethers.Interface(Namespace.abi);
+app.post(
+  '/unique-namespace',
+  authenticateToken,
+  (req, _res, next) => validateNamespace(req.body.namespace, next),
+  async (req, res, next) => {
+    try {
+      const NamespaceContract = getNamespaceContract();
 
-  const ownerBalance = await NamespaceContract.balanceOf(walletAddress);
-  if (ownerBalance === BigInt(0)) {
-    return new Set();
-  }
-
-  const ownerTokensArray = Array.from({ length: Number(ownerBalance) }, (_, index) => index);
-  const BATCH_SIZE = 500;
-  const tokenChunks = [];
-  for (let i = 0; i < ownerTokensArray.length; i += BATCH_SIZE) {
-    tokenChunks.push(ownerTokensArray.slice(i, i + BATCH_SIZE));
-  }
-
-  let tokenIds = [];
-  for (const chunk of tokenChunks) {
-    const calls = chunk.map((index) => ({
-      target: Namespace.address,
-      allowFailure: true,
-      callData: NamespaceInterface.encodeFunctionData('tokenOfOwnerByIndex', [
-        walletAddress,
-        index,
-      ]),
-    }));
-
-    const multicallResults = await Multicall3Contract.aggregate3.staticCall(calls);
-
-    const results = multicallResults.map(({ success, returnData }, i) => {
-      if (!success) {
-        console.error(`Failed to retrieve token ID for index: ${chunk[i]}`);
-        return null;
+      const tokenId = await NamespaceContract.namespaceToTokenId(req.body.namespace);
+      if (!tokenId) {
+        res.status(200).json({ unique: true });
+        return;
       }
-      return NamespaceInterface.decodeFunctionResult('tokenOfOwnerByIndex', returnData)[0];
-    });
-
-    tokenIds = tokenIds.concat(results);
-  }
-
-  const tokenChunksForNamespaces = [];
-  for (let i = 0; i < tokenIds.length; i += BATCH_SIZE) {
-    tokenChunksForNamespaces.push(tokenIds.slice(i, i + BATCH_SIZE));
-  }
-
-  const namespaces = new Set();
-  for (const chunk of tokenChunksForNamespaces) {
-    const calls = chunk.map((tokenId) => ({
-      target: Namespace.address,
-      allowFailure: true,
-      callData: NamespaceInterface.encodeFunctionData('tokenIdToNamespace', [tokenId]),
-    }));
-
-    const multicallResults = await Multicall3Contract.aggregate3.staticCall(calls);
-
-    const results = multicallResults.map(({ success, returnData }, i) => {
-      if (!success) {
-        console.error(`Failed to fetch namespace for token ID ${chunk[i]}`);
-        return null;
+      const owner = await NamespaceContract.ownerOf(tokenId);
+      if (owner.toLowerCase() === req.user.walletAddress.toLowerCase()) {
+        res.status(200).json({ unique: true });
+        return;
       }
-      return NamespaceInterface.decodeFunctionResult('tokenIdToNamespace', returnData)[0];
-    });
-
-    for (const namespace of results) {
-      if (namespace) namespaces.add(namespace);
+      if (owner.toLowerCase() !== req.user.walletAddress.toLowerCase()) {
+        res.status(200).json({ unique: false });
+        return;
+      }
+    } catch (err) {
+      next(err);
     }
   }
-  return namespaces;
-};
-
-app.post('/unique-namespace', authenticateToken, async (req, res, next) => {
-  if (!req.body.namespace) {
-    return next(new HttpError('Missing namespace', 400));
-  }
-
-  try {
-    const namespaces = await getNamespacesFromContract(req.user.walletAddress);
-    res.status(200).json({ unique: !namespaces.has(req.body.namespace) });
-  } catch (err) {
-    next(err);
-  }
-});
+);
 
 const checkGeneratedKey = async ({ walletAddress, key }) => {
   return gun.get(generateHash(walletAddress.toLowerCase())).get('generated-keys').get(key);
@@ -839,7 +855,9 @@ app.post('/remove-cid', authenticateToken, verifyRemoveCidNamespace, async (req,
       return next(new HttpError('CID missed.', 400));
     }
 
-    const response = await fetch(`${IPFS_CLUSTER_URL}api/v0/pin/rm?arg=${cid}`, { method: 'POST' });
+    const response = await fetch(`${UPSTREAM_IPFS_CLUSTER_URL}/api/v0/pin/rm?arg=${cid}`, {
+      method: 'POST',
+    });
     if (!response.ok) {
       throw new HttpError(`Failed to remove CID ${cid} from IPFS`);
     }
@@ -905,7 +923,7 @@ app.use(
   '/api/v0/dag/import',
   authenticateToken,
   createProxyMiddleware({
-    target: `${IPFS_URL}/api/v0/dag/import`,
+    target: `${UPSTREAM_IPFS_URL}/api/v0/dag/import`,
     pathRewrite: {
       '^/': '',
     },
@@ -917,7 +935,9 @@ app.use(
           if (_proxyRes.statusCode < 400) {
             const cid = JSON.parse(responseBuffer.toString('utf8')).Root?.Cid['/'];
             if (cid) {
-              await fetch(`${IPFS_CLUSTER_URL}api/v0/pin/add?arg=${cid}`, { method: 'POST' });
+              await fetch(`${UPSTREAM_IPFS_CLUSTER_URL}/api/v0/pin/add?arg=${cid}`, {
+                method: 'POST',
+              });
               await addCidToGeneratedKey({
                 walletAddress: req.user.walletAddress,
                 key: req.query.key,
@@ -938,7 +958,7 @@ app.use(
   '/api/v0/dag/get',
   authenticateToken,
   createProxyMiddleware({
-    target: `${IPFS_URL}/api/v0/dag/get`,
+    target: `${UPSTREAM_IPFS_URL}/api/v0/dag/get`,
     pathRewrite: {
       '^/': '',
     },

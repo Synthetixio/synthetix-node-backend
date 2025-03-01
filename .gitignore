@@ -131,3 +131,4 @@ dist
 !.yarn/versions
 
 .idea
+local-gundb-data
