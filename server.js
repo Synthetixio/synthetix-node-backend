@@ -238,7 +238,7 @@ const createNonce = async (req, res, next) => {
   }
 };
 
-app.post('/signup', validateWalletAddress, transformWalletAddress, createNonce);
+app.post('/api/signup', validateWalletAddress, transformWalletAddress, createNonce);
 
 const server = app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
@@ -299,7 +299,7 @@ const saveTokenToGun = (walletAddress, encryptedToken) => {
   });
 };
 
-app.post('/verify', validateVerificationParameters, verifyMessage, async (_req, res, next) => {
+app.post('/api/verify', validateVerificationParameters, verifyMessage, async (_req, res, next) => {
   try {
     const token = await createJwtToken(res.locals.address);
     const encryptedToken = await encrypt(generateHash(token));
@@ -449,7 +449,7 @@ const verifyNamePublishNamespace = async (req, _res, next) => {
   }
 };
 
-app.get('/protected', authenticateToken, (_req, res) => {
+app.get('/api/protected', authenticateToken, (_req, res) => {
   res.send('Hello! You are viewing protected content.');
 });
 
@@ -636,7 +636,7 @@ const fetchApprovedWallets = async () => {
   return response.json();
 };
 
-app.get('/approved-wallets', authenticateAdmin, async (_req, res, next) => {
+app.get('/api/approved-wallets', authenticateAdmin, async (_req, res, next) => {
   try {
     res.status(200).send(await fetchApprovedWallets());
   } catch (err) {
@@ -664,7 +664,7 @@ const fetchSubmittedWallets = async () => {
   return response.json();
 };
 
-app.get('/submitted-wallets', authenticateAdmin, async (_req, res, next) => {
+app.get('/api/submitted-wallets', authenticateAdmin, async (_req, res, next) => {
   try {
     res.status(200).send(await fetchSubmittedWallets());
   } catch (err) {
@@ -672,7 +672,7 @@ app.get('/submitted-wallets', authenticateAdmin, async (_req, res, next) => {
   }
 });
 
-app.post('/refresh-token', validateWalletAddress, authenticateToken, async (req, res, next) => {
+app.post('/api/refresh-token', validateWalletAddress, authenticateToken, async (req, res, next) => {
   try {
     const token = req.headers.authorization.split(' ')[1];
     await validateTokenWithGun(req.body.walletAddress, token);
@@ -758,7 +758,7 @@ app.post('/refresh-token', validateWalletAddress, authenticateToken, async (req,
 //};
 
 app.post(
-  '/unique-namespace',
+  '/api/unique-namespace',
   authenticateToken,
   (req, _res, next) => validateNamespace(req.body.namespace, next),
   async (req, res, next) => {
@@ -789,7 +789,7 @@ const checkGeneratedKey = async ({ walletAddress, key }) => {
   return gun.get(generateHash(walletAddress.toLowerCase())).get('generated-keys').get(key);
 };
 
-app.post('/unique-generated-key', authenticateToken, async (req, res, next) => {
+app.post('/api/unique-generated-key', authenticateToken, async (req, res, next) => {
   try {
     const unique = await checkGeneratedKey({
       walletAddress: req.user.walletAddress,
@@ -823,7 +823,7 @@ const getGeneratedKey = async (walletAddress) => {
   );
 };
 
-app.get('/generated-keys', authenticateToken, async (req, res, next) => {
+app.get('/api/generated-keys', authenticateToken, async (req, res, next) => {
   try {
     res.status(200).json({ keys: await getGeneratedKey(req.user.walletAddress) });
   } catch (err) {
@@ -843,7 +843,7 @@ const verifyCidNamespace = async (req, _res, next) => {
   }
 };
 
-app.get('/cids', authenticateToken, verifyCidNamespace, async (req, res, next) => {
+app.get('/api/cids', authenticateToken, verifyCidNamespace, async (req, res, next) => {
   try {
     res.status(200).json({
       cids: await getCidsFromGeneratedKey({
@@ -868,7 +868,7 @@ const verifyRemoveCidNamespace = async (req, _res, next) => {
   }
 };
 
-app.post('/remove-cid', authenticateToken, verifyRemoveCidNamespace, async (req, res, next) => {
+app.post('/api/remove-cid', authenticateToken, verifyRemoveCidNamespace, async (req, res, next) => {
   try {
     const { cid, key } = req.body;
 
@@ -986,7 +986,7 @@ app.use(
   })
 );
 
-app.get('/screenshot', async (req, res, next) => {
+app.get('/api/screenshot', async (req, res, next) => {
   const { url } = req.query;
 
   if (!url) {
