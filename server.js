@@ -126,9 +126,7 @@ function updatePeers() {
       }
       try {
         const data = JSON.parse(stdout);
-        console.log(data);
         const peers = require('./resolvePeers')(data);
-        console.log(peers);
         return Object.assign(state, { peers });
       } catch (e) {
         return console.error(e);
