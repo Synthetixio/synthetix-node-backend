@@ -114,28 +114,27 @@ async function updateStats() {
   Object.assign(state, { dailyIn, hourlyIn, dailyOut, hourlyOut });
 }
 
-async function updatePeers() {
-  const peers = await new Promise((resolve) =>
-    cp.exec(
-      "ipfs-cluster-ctl --enc=json peers ls | jq '{id, version, ipfs}' | jq '[inputs]'",
-      async (err, stdout, stderr) => {
-        if (err) {
-          console.error(err);
-          return resolve([]);
-        }
-        if (stderr) {
-          console.error(new Error(stderr));
-          return resolve([]);
-        }
-        try {
-          return require('resolvePeers')(JSON.parse(stdout));
-        } catch (_e) {
-          return resolve([]);
-        }
+function updatePeers() {
+  cp.exec(
+    "ipfs-cluster-ctl --enc=json peers ls | jq '{id, version, ipfs}' | jq '[inputs]'",
+    (err, stdout, stderr) => {
+      if (err) {
+        return console.error(err);
       }
-    )
+      if (stderr) {
+        return console.error(new Error(stderr));
+      }
+      try {
+        const data = JSON.parse(stdout);
+        console.log(data);
+        const peers = require('./resolvePeers')(data);
+        console.log(peers);
+        return Object.assign(state, { peers });
+      } catch (e) {
+        return console.error(e);
+      }
+    }
   );
-  Object.assign(state, { peers });
 }
 
 setInterval(updatePeers, 60_000);
@@ -207,7 +206,8 @@ app.post('/api/signup', validateWalletAddress, transformWalletAddress, createNon
 
 const server = app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
-  Promise.all([updateStats(), updatePeers()]);
+  updatePeers();
+  updateStats();
 });
 const gun = Gun({ web: server, file: process.env.GUNDB_STORAGE_PATH });
 
