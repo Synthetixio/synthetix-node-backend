@@ -1,8 +1,8 @@
 const ip = require('ip');
 const geoip = require('geoip-country');
-const duplicates = new Set();
 
 function resolvePeers(data) {
+  const duplicates = new Set();
   return data.flatMap(({ id, version, ipfs }) =>
     ipfs.addresses
       .map((address) => {
