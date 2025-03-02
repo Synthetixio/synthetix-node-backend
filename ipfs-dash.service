@@ -1,0 +1,14 @@
+[Unit]
+Description=Synthetix IPFS Dashboard
+After=network.target
+
+[Service]
+User=ipfs
+Group=ipfs
+WorkingDirectory=/home/ipfs/ipfs-dash
+ExecStart=/usr/bin/node server
+Restart=always
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
