@@ -13,6 +13,7 @@ const jwt = require('jsonwebtoken');
 const app = express();
 require('dotenv').config();
 const { createProxyMiddleware, responseInterceptor } = require('http-proxy-middleware');
+const basicAuth = require('basic-auth');
 
 const PORT = process.env.PORT || 3005;
 
@@ -320,13 +321,33 @@ app.use(
 );
 
 const verifyToken = (req) => {
-  const authHeader = req.headers.authorization;
-  const token = authHeader?.split(' ')[1];
-  if (token == null) throw new HttpError('Unauthorized', 401);
+  let token = null;
 
+  // Case 1: Handle token from Authorization header
+  const authHeader = req.headers.authorization;
+  if (authHeader?.startsWith('Bearer ')) {
+    token = authHeader.split(' ')[1];
+  }
+
+  // Case 2: Fallback to Basic Auth
+  if (!token) {
+    const auth = basicAuth(req);
+    if (auth?.name === 'token' && auth?.pass) {
+      token = auth.pass;
+    }
+  }
+
+  // If no token is found, throw an unauthorized error
+  if (!token) {
+    throw new HttpError('Unauthorized', 401);
+  }
+
+  // Verify the JWT token
   return new Promise((resolve, reject) => {
     jwt.verify(token, process.env.JWT_SECRET_KEY, (err, decoded) => {
-      if (err) reject(new HttpError('Forbidden', 403));
+      if (err) {
+        return reject(new HttpError('Forbidden', 403));
+      }
       resolve(decoded);
     });
   });

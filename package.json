@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@synthetixio/synthetix-node-namespace": "^0.1.1",
+    "basic-auth": "^2.0.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "ethers": "^6.13.5",
