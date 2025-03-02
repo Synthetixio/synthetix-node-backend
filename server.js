@@ -986,7 +986,7 @@ app.use(
   })
 );
 
-app.get('/api/screenshot', async (req, res, next) => {
+app.get('/api/screenshot', authenticateToken, async (req, res, next) => {
   const { url } = req.query;
 
   if (!url) {
@@ -1005,7 +1005,7 @@ app.get('/api/screenshot', async (req, res, next) => {
       args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
     });
     const page = await browser.newPage();
-    await page.setViewport({ width: 1920, height: 1080 });
+    await page.setViewport({ width: 800, height: 600 });
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 120000 });
     const screenshotBase64 = await page.screenshot({
       encoding: 'base64',
