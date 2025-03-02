@@ -21,7 +21,7 @@ function peersTracking() {
 
         // TODO: switch to GunDB
         await fs.promises.mkdir(`./data/${year}/${month}/${day}/${hour}`, { recursive: true });
-        const [yearlyTotal, monthlyTotal, daylyTotal, hourlyTotal] = await Promise.all([
+        const [yearlyTotal, monthlyTotal, dailyTotal, hourlyTotal] = await Promise.all([
           fs.promises.readFile(`./data/${year}/total`, 'utf8').catch(() => '0'),
           fs.promises.readFile(`./data/${year}/${month}/total`, 'utf8').catch(() => '0'),
           fs.promises.readFile(`./data/${year}/${month}/${day}/total`, 'utf8').catch(() => '0'),
@@ -31,7 +31,7 @@ function peersTracking() {
         ]);
         const newYearlyTotal = Number.parseInt(yearlyTotal) + 1;
         const newMonthlyTotal = Number.parseInt(monthlyTotal) + 1;
-        const newDaylyTotal = Number.parseInt(daylyTotal) + 1;
+        const newDailyTotal = Number.parseInt(dailyTotal) + 1;
         const newHourlyTotal = Number.parseInt(hourlyTotal) + 1;
 
         await Promise.all([
@@ -40,14 +40,14 @@ function peersTracking() {
             .writeFile(`./data/${year}/${month}/total`, `${newMonthlyTotal}`)
             .catch(() => null),
           fs.promises
-            .writeFile(`./data/${year}/${month}/${day}/total`, `${newDaylyTotal}`)
+            .writeFile(`./data/${year}/${month}/${day}/total`, `${newDailyTotal}`)
             .catch(() => null),
           fs.promises
             .writeFile(`./data/${year}/${month}/${day}/${hour}/total`, `${newHourlyTotal}`)
             .catch(() => null),
         ]);
         for (const { id } of data) {
-          const [yearly, monthly, dayly, hourly] = await Promise.all([
+          const [yearly, monthly, daily, hourly] = await Promise.all([
             fs.promises.readFile(`./data/${year}/${id}`, 'utf8').catch(() => '0'),
             fs.promises.readFile(`./data/${year}/${month}/${id}`, 'utf8').catch(() => '0'),
             fs.promises.readFile(`./data/${year}/${month}/${day}/${id}`, 'utf8').catch(() => '0'),
@@ -57,7 +57,7 @@ function peersTracking() {
           ]);
           const newYearly = Number.parseInt(yearly) + 1;
           const newMonthly = Number.parseInt(monthly) + 1;
-          const newDayly = Number.parseInt(dayly) + 1;
+          const newDaily = Number.parseInt(daily) + 1;
           const newHourly = Number.parseInt(hourly) + 1;
 
           await Promise.all([
@@ -66,7 +66,7 @@ function peersTracking() {
               .writeFile(`./data/${year}/${month}/${id}`, `${newMonthly}`)
               .catch(() => null),
             fs.promises
-              .writeFile(`./data/${year}/${month}/${day}/${id}`, `${newDayly}`)
+              .writeFile(`./data/${year}/${month}/${day}/${id}`, `${newDaily}`)
               .catch(() => null),
             fs.promises
               .writeFile(`./data/${year}/${month}/${day}/${hour}/${id}`, `${newHourly}`)
@@ -76,7 +76,7 @@ function peersTracking() {
           state.peerUptime[id] = {
             yearly: newYearly / newYearlyTotal,
             monthly: newMonthly / newMonthlyTotal,
-            dayly: newDayly / newDaylyTotal,
+            daily: newDaily / newDailyTotal,
             hourly: newHourly / newHourlyTotal,
           };
         }
