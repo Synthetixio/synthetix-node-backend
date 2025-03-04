@@ -135,6 +135,15 @@ const verifyMessage = async (req, res, next) => {
 
 const createJwtToken = async (walletAddress) => {
   return new Promise((resolve, reject) => {
+    jwt.sign({ walletAddress }, process.env.JWT_SECRET_KEY, { expiresIn: '1d' }, (err, token) => {
+      if (err) reject(err);
+      resolve(token);
+    });
+  });
+};
+
+const createJwtApiToken = async (walletAddress) => {
+  return new Promise((resolve, reject) => {
     jwt.sign({ walletAddress }, process.env.JWT_SECRET_KEY, {}, (err, token) => {
       if (err) reject(err);
       resolve(token);
@@ -157,6 +166,21 @@ const saveTokenToGun = (walletAddress, encryptedToken) => {
   });
 };
 
+const saveApiTokenToGun = (walletAddress, encryptedToken) => {
+  return new Promise((resolve, reject) => {
+    gun
+      .get(generateHash(walletAddress.toLowerCase()))
+      .get('api-tokens')
+      .put(encryptedToken, (ack) => {
+        if (ack.err) {
+          reject(new HttpError('Failed to save api token to Gun'));
+        } else {
+          resolve();
+        }
+      });
+  });
+};
+
 app.post('/api/verify', validateVerificationParameters, verifyMessage, async (_req, res, next) => {
   try {
     const token = await createJwtToken(res.locals.address);
@@ -167,6 +191,22 @@ app.post('/api/verify', validateVerificationParameters, verifyMessage, async (_r
     next(err);
   }
 });
+
+app.post(
+  '/api/verify-api-token',
+  validateVerificationParameters,
+  verifyMessage,
+  async (_req, res, next) => {
+    try {
+      const apiToken = await createJwtApiToken(res.locals.address);
+      const encryptedApiToken = await encrypt(apiToken);
+      await saveApiTokenToGun(res.locals.address, encryptedApiToken);
+      res.status(200).send({ apiToken });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 app.use(
   '/api/v0/cat',
@@ -221,6 +261,36 @@ const validateTokenWithGun = (walletAddress, token) => {
           reject(new HttpError('Unauthorized', 401));
         } else {
           resolve();
+        }
+      });
+  });
+};
+
+const validateApiTokenWithGun = (walletAddress, token) => {
+  return new Promise((resolve, reject) => {
+    gun
+      .get(generateHash(walletAddress.toLowerCase()))
+      .get('api-tokens')
+      .once(async (tokenData) => {
+        if (!tokenData || (await decrypt(tokenData)) !== token) {
+          reject(new HttpError('Forbidden', 403));
+        } else {
+          resolve();
+        }
+      });
+  });
+};
+
+const getApiTokenWithGun = (walletAddress) => {
+  return new Promise((resolve) => {
+    gun
+      .get(generateHash(walletAddress.toLowerCase()))
+      .get('api-tokens')
+      .once(async (tokenData) => {
+        if (!tokenData) {
+          resolve(null);
+        } else {
+          resolve(await decrypt(tokenData));
         }
       });
   });
@@ -309,6 +379,16 @@ const verifyNamePublishNamespace = async (req, _res, next) => {
 
 app.get('/api/protected', authenticateToken, (_req, res) => {
   res.send('Hello! You are viewing protected content.');
+});
+
+app.post('/api/generate-api-nonce', authenticateToken, createNonce);
+
+app.get('/api/api-token', authenticateToken, async (req, res, next) => {
+  try {
+    res.status(200).json({ apiToken: await getApiTokenWithGun(req.user.walletAddress) });
+  } catch (err) {
+    next(err);
+  }
 });
 
 const saveGeneratedKey = ({ walletAddress, key, id }) => {
@@ -530,14 +610,13 @@ app.get('/api/submitted-wallets', authenticateAdmin, async (_req, res, next) => 
   }
 });
 
-app.post('/api/refresh-token', validateWalletAddress, authenticateToken, async (req, res, next) => {
+app.post('/api/regenerate-api-token', authenticateToken, async (req, res, next) => {
   try {
-    const token = req.headers.authorization.split(' ')[1];
-    await validateTokenWithGun(req.body.walletAddress, token);
-    const newToken = await createJwtToken(req.body.walletAddress);
-    const encryptedNewToken = await encrypt(generateHash(newToken));
-    await saveTokenToGun(req.body.walletAddress, encryptedNewToken);
-    res.status(200).send({ token: newToken });
+    await validateApiTokenWithGun(req.user.walletAddress, req.body.apiToken);
+    const newApiToken = await createJwtApiToken(req.user.walletAddress);
+    const encryptedNewApiToken = await encrypt(newApiToken);
+    await saveApiTokenToGun(req.user.walletAddress, encryptedNewApiToken);
+    res.status(200).send({ apiToken: newApiToken });
   } catch (err) {
     next(err);
   }
