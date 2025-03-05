@@ -266,6 +266,21 @@ const validateTokenWithGun = (walletAddress, token) => {
   });
 };
 
+const validateApiTokenWithGun = (walletAddress, token) => {
+  return new Promise((resolve, reject) => {
+    gun
+      .get(generateHash(walletAddress.toLowerCase()))
+      .get('api-tokens')
+      .once(async (tokenData) => {
+        if (!tokenData || (await decrypt(tokenData)) !== generateHash(token)) {
+          reject(new HttpError('Unauthorized', 401));
+        } else {
+          resolve();
+        }
+      });
+  });
+};
+
 const checkApiTokenWithGun = (walletAddress) => {
   return new Promise((resolve) => {
     gun
@@ -285,7 +300,11 @@ const authenticateToken = async (req, _res, next) => {
       throw new HttpError('Unauthorized', 401);
     }
     const token = req.headers.authorization.split(' ')[1];
-    await validateTokenWithGun(decoded.walletAddress, token);
+    if (req.query.api) {
+      await validateApiTokenWithGun(decoded.walletAddress, token);
+    } else {
+      await validateTokenWithGun(decoded.walletAddress, token);
+    }
     req.user = decoded;
     next();
   } catch (err) {
