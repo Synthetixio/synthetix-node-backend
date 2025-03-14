@@ -884,21 +884,28 @@ app.use(
     pathRewrite: {
       '^/': '',
     },
+  })
+);
+
+app.use(
+  '/api/v0/pin/add',
+  authenticateToken,
+  createProxyMiddleware({
+    target: `${UPSTREAM_IPFS_CLUSTER_URL}/api/v0/pin/add`,
+    pathRewrite: {
+      '^/': '',
+    },
     selfHandleResponse: true,
     on: {
-      proxyRes: responseInterceptor(async (responseBuffer, _proxyRes, req, res) => {
+      proxyRes: responseInterceptor(async (responseBuffer, proxyRes, req, res) => {
         try {
           res.removeHeader('trailer');
-          if (_proxyRes.statusCode < 400) {
-            const cid = JSON.parse(responseBuffer.toString('utf8')).Root?.Cid['/'];
-            if (cid) {
-              await fetch(`${UPSTREAM_IPFS_CLUSTER_URL}/api/v0/pin/add?arg=${cid}`, {
-                method: 'POST',
-              });
+          if (proxyRes.statusCode < 400) {
+            if (req.query.arg && req.query.customKey) {
               await addCidToGeneratedKey({
                 walletAddress: req.user.walletAddress,
-                key: req.query.key,
-                cid,
+                key: req.query.customKey,
+                cid: req.query.arg,
               });
             }
           }
