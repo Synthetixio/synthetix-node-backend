@@ -18,6 +18,7 @@ const {
   PORT,
   UPSTREAM_IPFS_URL,
   UPSTREAM_IPFS_CLUSTER_URL,
+  IPFS_GATEWAY_URL,
   GRAPH_API_ENDPOINT,
 } = require('./env');
 
@@ -845,15 +846,10 @@ app.use(
 );
 
 app.get('/api/screenshot', authenticateToken, async (req, res, next) => {
-  const { url } = req.query;
+  const { ipns } = req.query;
 
-  if (!url) {
-    return next(new HttpError('URL parameter is required', 400));
-  }
-
-  const urlPattern = /^(https?:\/\/[a-zA-Z0-9.-]+(:\d+)?\/ipns\/[a-zA-Z0-9\/_-]+)$/;
-  if (!urlPattern.test(url)) {
-    return next(new HttpError('Invalid url', 400));
+  if (!ipns) {
+    return next(new HttpError('IPNS parameter is required', 400));
   }
 
   let browser;
@@ -864,13 +860,16 @@ app.get('/api/screenshot', authenticateToken, async (req, res, next) => {
     });
     const page = await browser.newPage();
     await page.setViewport({ width: 800, height: 600 });
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 120000 });
+    await page.goto(`${IPFS_GATEWAY_URL}/ipns/${ipns}/`, {
+      waitUntil: 'networkidle2',
+      timeout: 120000,
+    });
     const screenshotBase64 = await page.screenshot({
       encoding: 'base64',
     });
     await browser.close();
 
-    res.json({ image: `data:image/png;base64,${screenshotBase64}` });
+    res.json({ screenshotBase64 });
   } catch {
     next(new HttpError('Failed to generate screenshot', 500));
   } finally {
